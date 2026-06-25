@@ -1,0 +1,62 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Python package builds
+build/
+dist/
+*.egg-info/
+*.whl
+
+# Native/CUDA extension builds
+*.so
+*.o
+*.obj
+*.dll
+*.dylib
+*.pyd
+*.cu.o
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+compile_commands.json
+.ninja_*
+
+# Local environments and secrets
+.env
+.env.*
+.venv/
+venv/
+.conda/
+
+# Experiment outputs
+runs/
+logs/
+outputs/
+checkpoints/
+wandb/
+tensorboard/
+artifacts/
+tmp/
+*.tmp
+
+# Local data directories
+data/
+datasets/
+
+# Notebooks and editor state
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+.idea/
+
+# Frontend/backend app builds
+node_modules/
+.next/
+dist-*/
+coverage/
