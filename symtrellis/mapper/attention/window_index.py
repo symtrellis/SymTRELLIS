@@ -164,6 +164,7 @@ def build_swin_indices(
         `cross_{name}` for query=`coords`, kv=`ctx_coords`;
         `self_dst_{name}` for self-attention over `coords`;
         `self_src_{name}` for self-attention over `ctx_coords`.
+        These keys are the contract consumed by `Swin3DLatentMapperBlock`.
     """
     results: Dict[str, WindowIndex] = {}
     for shift_window in shift_sequence:

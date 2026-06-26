@@ -15,10 +15,10 @@ class EdgeFeatureHead(nn.Module):
     Shapes:
       feats_src: [num_src, C], with C == feat_channels.
       pos_src: [num_src, 3]
-      coords_dst: [num_dst, 4], coords_dst[:, 0] indexes relation-level cond.
+      coords_dst: [num_dst, 4], coords_dst[:, 0] indexes relation-level condition.
       feats_dst: [num_dst, C], with C == feat_channels.
       pos_dst: [num_dst, 3]
-      cond: [num_relations, cond_channels]
+      condition: [num_relations, condition_dim]
       e_ids_src: [E], edge -> src entry index.
       e_ids_dst: [E], edge -> dst entry index.
 
@@ -29,7 +29,7 @@ class EdgeFeatureHead(nn.Module):
       FourierPE(pos_src[e_ids_src] - pos_dst[e_ids_dst]) if use_geom=True
       pos_src[e_ids_src] - pos_dst[e_ids_dst] if use_geom=True
       ||pos_src[e_ids_src] - pos_dst[e_ids_dst]||^2 if use_geom=True
-      cond[coords_dst[e_ids_dst, 0]] if use_cond=True
+      condition[coords_dst[e_ids_dst, 0]] if use_cond=True
 
     The relative position vector points from the dst entry to the src entry.
 
@@ -40,7 +40,7 @@ class EdgeFeatureHead(nn.Module):
     def __init__(
         self,
         feat_channels: int,
-        cond_channels: int,
+        condition_dim: int,
         edge_dim: int,
         hidden: int = 128,
         mlp_depth: int = 2,
@@ -49,12 +49,24 @@ class EdgeFeatureHead(nn.Module):
         pe_max_freq: float = 0.5,
         use_cond: bool = True,
     ):
+        """
+        Args:
+            feat_channels: Feature width of both src and dst entries.
+            condition_dim: Width of each relation-level conditioning row.
+            edge_dim: Output edge feature width.
+            hidden: Hidden width of the edge MLP.
+            mlp_depth: Number of linear layers in the edge MLP.
+            use_geom: Whether to append relative geometry features.
+            pe_num_bands: Number of Fourier bands for relative position.
+            pe_max_freq: Maximum Fourier frequency in cycles per unit.
+            use_cond: Whether to append relation-level condition features.
+        """
         super().__init__()
         self.use_geom = use_geom
         self.use_cond = use_cond
 
         self.feat_channels = feat_channels
-        self.cond_channels = cond_channels
+        self.condition_dim = condition_dim
         self.edge_dim = edge_dim
 
         in_dim = 3 * feat_channels
@@ -70,7 +82,7 @@ class EdgeFeatureHead(nn.Module):
             )
 
         if use_cond:
-            in_dim += cond_channels
+            in_dim += condition_dim
 
         layers = []
         d = in_dim
@@ -88,12 +100,23 @@ class EdgeFeatureHead(nn.Module):
         coords_dst: torch.Tensor,
         feats_dst: torch.Tensor,
         pos_dst: torch.Tensor,
-        cond: torch.Tensor,
+        condition: torch.Tensor,
         e_ids_dst: torch.Tensor,
         e_ids_src: torch.Tensor,
     ):
         """
         Return one feature vector for each src-to-dst edge.
+
+        Args:
+          feats_src: [num_src, feat_channels] source entry features.
+          pos_src: [num_src, 3] source entry positions.
+          coords_dst: [num_dst, 4] destination entry coordinates. The first
+            column indexes rows in `condition`.
+          feats_dst: [num_dst, feat_channels] destination entry features.
+          pos_dst: [num_dst, 3] destination entry positions.
+          condition: [num_relations, condition_dim] relation-level condition.
+          e_ids_dst: [E] edge -> destination entry index.
+          e_ids_src: [E] edge -> source entry index.
 
         Returns:
           edge_feat: [E, edge_dim].
@@ -113,7 +136,7 @@ class EdgeFeatureHead(nn.Module):
 
         if self.use_cond:
             # coords_dst[:, 0] is a relation id, not a geometric coordinate.
-            feats += [cond[coords_dst[e_ids_dst, 0]]]
+            feats += [condition[coords_dst[e_ids_dst, 0]]]
 
         x = torch.cat(feats, dim=-1)  # [E, in_dim]
         edge_feat = self.mlp(x)

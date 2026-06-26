@@ -297,7 +297,7 @@ class SymmetryProjector:
 
     rows_src and rows_dst may repeat. Repeated dst rows are summed and then
     averaged by counts_dst. Rows with no dst contribution output zero when
-    self_include=False, matching the old projection behavior.
+    self_include=False.
     """
 
     def __init__(

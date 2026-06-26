@@ -36,12 +36,12 @@ class PoseConditioner(nn.Module):
       represented modulo that period.
 
     Output:
-      cond: [B, cond_dim]
+      condition: [B, condition_dim]
     """
 
     def __init__(
         self,
-        cond_dim: int,
+        condition_dim: int,
         t_num_freqs: int = 10,
         t_include_input: bool = False,
         freq_min: float = 1.0,
@@ -49,9 +49,21 @@ class PoseConditioner(nn.Module):
         hidden_dim: int = 256,
         num_layers: int = 2,
     ):
+        """
+        Args:
+            condition_dim: Output condition feature width.
+            t_num_freqs: Number of dyadic Fourier frequencies for translation.
+            t_include_input: Whether to append raw `t` to its Fourier features.
+                If False, integer-period translations are intentionally aliased
+                by the periodic encoding.
+            freq_min: Lowest translation frequency in cycles per unit.
+            sign_dim: Embedding width for the discrete orientation sign token.
+            hidden_dim: Hidden width of the MLP.
+            num_layers: Number of linear layers in the MLP.
+        """
 
         super().__init__()
-        self.cond_dim = cond_dim
+        self.condition_dim = condition_dim
         self.t_num_freqs = t_num_freqs
         self.t_include_input = t_include_input
         self.freq_min = float(freq_min)
@@ -70,7 +82,7 @@ class PoseConditioner(nn.Module):
             layers.append(nn.Linear(d, hidden_dim))
             layers.append(nn.SiLU())
             d = hidden_dim
-        layers.append(nn.Linear(d, self.cond_dim))
+        layers.append(nn.Linear(d, self.condition_dim))
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, R: torch.Tensor, t: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
@@ -81,7 +93,7 @@ class PoseConditioner(nn.Module):
           s: [B], integer token in {0, 1}
 
         Returns:
-          cond: [B, cond_dim]
+          condition: [B, condition_dim]
         """
         assert R.ndim == 3 and R.shape[-2:] == (3, 3)
         assert t.ndim == 2 and t.shape[1] == 3
@@ -98,4 +110,4 @@ class PoseConditioner(nn.Module):
         s_feat = self.sign_embed(s)
 
         x = torch.cat([r6, t_feat, s_feat], dim=1)
-        return self.mlp(x)  # [B, cond_dim]
+        return self.mlp(x)  # [B, condition_dim]

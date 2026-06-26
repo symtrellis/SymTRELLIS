@@ -32,29 +32,37 @@ class SparseAdaLayerNorm(nn.Module):
     """
     Adaptive LayerNorm for sparse feature rows.
 
-    coords[:, 0] is used as the row index into cond. In other words, the first
-    coordinate column must already match the conditioning table.
+    coords[:, 0] is used as the row index into condition. In other words, the
+    first coordinate column must already match the conditioning table.
 
     Shapes:
       feats: [N, dim].
       coords: [N, 4], integer sparse coordinates.
-      cond: [B, cond_dim].
+      condition: [num_conditions, condition_dim].
     """
 
     def __init__(
         self,
         dim: int,
-        cond_dim: int,
+        condition_dim: int,
         eps: float = 1e-5,
         zero_init: bool = True,
     ) -> None:
+        """
+        Args:
+            dim: Feature width.
+            condition_dim: Width of each conditioning row.
+            eps: LayerNorm epsilon.
+            zero_init: If True, initialize the affine modulation to zero so the
+                module starts as plain LayerNorm.
+        """
         super().__init__()
 
         self.dim = dim
-        self.cond_dim = cond_dim
+        self.condition_dim = condition_dim
         self.eps = eps
 
-        self.to_gamma_beta = nn.Linear(cond_dim, 2 * dim, bias=True)
+        self.to_gamma_beta = nn.Linear(condition_dim, 2 * dim, bias=True)
 
         if zero_init:
             nn.init.zeros_(self.to_gamma_beta.weight)
@@ -64,27 +72,33 @@ class SparseAdaLayerNorm(nn.Module):
         self,
         coords: torch.Tensor,
         feats: torch.Tensor,
-        cond: torch.Tensor,
+        condition: torch.Tensor,
     ) -> torch.Tensor:
         """
         Apply LayerNorm per sparse row, then modulate by its conditioning row.
+
+        Args:
+          coords: [N, 4] integer coordinates. `coords[:, 0]` indexes rows in
+            `condition`.
+          feats: [N, dim] sparse feature rows.
+          condition: [num_conditions, condition_dim] conditioning table.
 
         Returns:
           [N, dim] features with the same dtype as feats.
         """
         assert feats.ndim == 2 and feats.shape[1] == self.dim
         assert coords.ndim == 2 and coords.shape[1] == 4
-        assert cond.ndim == 2 and cond.shape[1] == self.cond_dim
+        assert condition.ndim == 2 and condition.shape[1] == self.condition_dim
 
-        idx_batch = coords[:, 0]
+        condition_rows = coords[:, 0]
         x = feats.float()
 
         # Normalize each sparse feature row independently.
         x = F.layer_norm(x, (self.dim,), weight=None, bias=None, eps=self.eps)
 
         # Use coords[:, 0] to select one affine modulation per sparse row.
-        gamma, beta = self.to_gamma_beta(cond).chunk(2, dim=1)  # [B, D], [B, D]
-        y = x * (1.0 + gamma[idx_batch]) + beta[idx_batch]
+        gamma, beta = self.to_gamma_beta(condition).chunk(2, dim=1)
+        y = x * (1.0 + gamma[condition_rows]) + beta[condition_rows]
 
         return y.to(dtype=feats.dtype)
 

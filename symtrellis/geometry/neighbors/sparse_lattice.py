@@ -7,7 +7,6 @@ import threading
 
 import torch
 
-
 _EXT = None
 _EXT_LOCK = threading.Lock()
 
@@ -34,9 +33,7 @@ def _check_shape(name: str, tensor: torch.Tensor, shape: tuple[int | None, ...])
 
     for dim, expected in enumerate(shape):
         if expected is not None and tensor.shape[dim] != expected:
-            raise ValueError(
-                f"{name}.shape[{dim}] must be {expected}, got {tensor.shape[dim]}"
-            )
+            raise ValueError(f"{name}.shape[{dim}] must be {expected}, got {tensor.shape[dim]}")
 
 
 def radius_nbr_edges_sparse_lattice(
@@ -50,8 +47,35 @@ def radius_nbr_edges_sparse_lattice(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Find radius-neighbor edges on a sparse integer lattice.
 
-    Large absolute coordinates should use float64 query positions, or already
-    shifted local float32 positions, so sub-cell residuals stay accurate.
+    This backend supports arbitrary int32 lattice coordinates, including
+    negative coordinates. It internally shifts coordinates by `coord_min` and
+    indexes keys in 4x4x4 coarse buckets.
+
+    Args:
+        query_pos: Float tensor with shape [Nq, 3]. Continuous query positions
+            in the same grid-index coordinate system as `key_coords`.
+        query_bid: Int32 tensor with shape [Nq]. Batch id for each query row.
+        key_coords: Int32 tensor with shape [Nk, 3]. Sparse integer lattice
+            coordinates. For every key row, `key_coords - coord_min` must be
+            non-negative.
+        key_bid: Int32 tensor with shape [Nk]. Batch id for each key row.
+        radius: Search radius in grid-index units. Must be finite and positive.
+        nbr_offsets: Int32 tensor with shape [L, 3], usually returned by
+            `lattice_ball_offsets(radius)`.
+        coord_min: Int32 tensor with shape [3]. Coordinate origin used to shift
+            arbitrary lattice coordinates into the non-negative bucket space.
+
+    Returns:
+        qids: Int64 tensor with shape [E]. Query row index for each edge.
+        kids: Int64 tensor with shape [E]. Key row index for each edge.
+
+    Notes:
+        All tensors must live on the same CPU or CUDA device. The wrapper makes
+        contiguous copies before calling the extension. Duplicate key rows that
+        map to the same batch, bucket, and 4x4x4 local slot are not supported by
+        the CUDA backend. Large absolute coordinates should use float64
+        `query_pos`, or already shifted local float32 positions, so sub-cell
+        residuals stay accurate.
     """
     _check_shape("query_pos", query_pos, (None, 3))
     _check_shape("query_bid", query_bid, (query_pos.shape[0],))

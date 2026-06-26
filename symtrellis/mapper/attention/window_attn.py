@@ -109,9 +109,7 @@ def window_attn_backend_flash_attn(
     passed as static Python integers from the configured window volume.
     """
     if q.dtype == torch.float32:
-        raise ValueError(
-            "flash-attn usually does not support float32. Use xformers for fp32."
-        )
+        raise ValueError("flash-attn usually does not support float32. Use xformers for fp32.")
 
     kv = torch.stack([k, v], dim=1).contiguous()  # [Mk,2,H,Dh]
 
@@ -141,11 +139,11 @@ class WindowMultiHeadAttention(nn.Module):
     key/value rows come from `ctx_*`.
 
     Args:
-        channels: Feature width of the query branch.
-        num_heads: Number of attention heads. `channels` must be divisible by
+        feat_dim: Feature width of the query branch.
+        num_heads: Number of attention heads. `feat_dim` must be divisible by
             `num_heads`.
-        ctx_channels: Feature width of the context branch. Defaults to
-            `channels` for self-attention.
+        ctx_feat_dim: Feature width of the context branch. Defaults to
+            `feat_dim` for self-attention.
         window_size: Window side lengths in grid cells. Used only to provide a
             static max sequence length to the backend.
         shift_window: Window shift used by the matching `WindowIndex`.
@@ -160,9 +158,9 @@ class WindowMultiHeadAttention(nn.Module):
 
     def __init__(
         self,
-        channels: int,
+        feat_dim: int,
         num_heads: int,
-        ctx_channels: Optional[int] = None,
+        ctx_feat_dim: Optional[int] = None,
         window_size: Tuple[int, int, int] = (3, 3, 3),
         shift_window: Tuple[int, int, int] = (0, 0, 0),
         qkv_bias: bool = True,
@@ -174,12 +172,12 @@ class WindowMultiHeadAttention(nn.Module):
     ) -> None:
         super().__init__()
 
-        assert channels % num_heads == 0
+        assert feat_dim % num_heads == 0
         assert attn_backend in ["xformers", "flash_attn"]
 
-        self.channels = channels
-        self.head_dim = channels // num_heads
-        self.ctx_channels = ctx_channels if ctx_channels is not None else channels
+        self.feat_dim = feat_dim
+        self.head_dim = feat_dim // num_heads
+        self.ctx_feat_dim = ctx_feat_dim if ctx_feat_dim is not None else feat_dim
         self.num_heads = num_heads
 
         self.window_size = window_size
@@ -189,14 +187,14 @@ class WindowMultiHeadAttention(nn.Module):
         self.qk_rms_norm = qk_rms_norm
         self.attn_backend = attn_backend
 
-        self.to_q = nn.Linear(channels, channels, bias=qkv_bias)
-        self.to_kv = nn.Linear(self.ctx_channels, channels * 2, bias=qkv_bias)
+        self.to_q = nn.Linear(feat_dim, feat_dim, bias=qkv_bias)
+        self.to_kv = nn.Linear(self.ctx_feat_dim, feat_dim * 2, bias=qkv_bias)
 
         if self.qk_rms_norm:
             self.q_rms_norm = SparseMultiHeadRMSNorm(self.head_dim, num_heads)
             self.k_rms_norm = SparseMultiHeadRMSNorm(self.head_dim, num_heads)
 
-        self.to_out = nn.Linear(channels, channels)
+        self.to_out = nn.Linear(feat_dim, feat_dim)
 
         if use_rope:
             self.rope = RotaryPositionEmbedder(
@@ -207,44 +205,33 @@ class WindowMultiHeadAttention(nn.Module):
 
     def forward(
         self,
-        x_coords: torch.Tensor,  # torch.int32 [N, 4]
-        x_feats: torch.Tensor,  # torch.float32/16, [N, C]
-        x_pos: torch.Tensor,  # torch.float32 [N, 3]
         window_index: WindowIndex,
-        ctx_coords: Optional[torch.Tensor] = None,
+        x_feats: torch.Tensor,  # torch.float32/16, [N, feat_dim]
+        x_pos: torch.Tensor,  # torch.float32 [N, 3]
         ctx_feats: Optional[torch.Tensor] = None,
         ctx_pos: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Apply window attention using a caller-provided `WindowIndex`.
 
         Args:
-            x_coords: Integer tensor with shape [Nq, 4]. It should be the same
-                coordinate tensor used to build `window_index`. The first column
-                is the batch/sample id, and the last three columns are integer
-                grid coordinates.
-            x_feats: Query feature tensor with shape [Nq, channels].
-            x_pos: Query position tensor with shape [Nq, 3], in the coordinate
-                system expected by the rotary position embedder.
             window_index: Required `WindowIndex`. `q_rows` indexes `x_feats` and
                 `x_pos`. In self-attention, `kv_rows` also indexes `x_feats` and
                 `x_pos`; in cross-attention, `kv_rows` indexes `ctx_feats` and
                 `ctx_pos`.
-            ctx_coords: Optional integer tensor with shape [Nkv, 4]. It must be
-                provided together with `ctx_feats` and `ctx_pos` for
-                cross-attention, and must match the context coordinates used to
-                build `window_index`.
+            x_feats: Query feature tensor with shape [Nq, feat_dim].
+            x_pos: Query position tensor with shape [Nq, 3], in the coordinate
+                system expected by the rotary position embedder.
             ctx_feats: Optional context feature tensor with shape
-                [Nkv, ctx_channels].
+                [Nkv, ctx_feat_dim].
             ctx_pos: Optional context position tensor with shape [Nkv, 3].
 
         Returns:
-            Tensor with shape [Nq, channels]. Rows listed in
+            Tensor with shape [Nq, feat_dim]. Rows listed in
             `window_index.q_rows` receive attended values; rows absent from
             `q_rows` are zero before the final output projection.
         """
 
-        assert (ctx_coords is None) == (ctx_feats is None)
-        assert (ctx_coords is None) == (ctx_pos is None)
+        assert (ctx_feats is None) == (ctx_pos is None)
 
         # Select the key/value branch. The window index, not this module,
         # defines which rows are grouped into each attention block.
@@ -301,7 +288,7 @@ class WindowMultiHeadAttention(nn.Module):
         else:
             raise ValueError(f"Unknown attention module: {self.attn_backend}")
 
-        out = out.reshape(*out.shape[:-2], self.channels)
+        out = out.reshape(*out.shape[:-2], self.feat_dim)
 
         # Scatter attended query rows back to the original query row layout.
         base = out.new_zeros((x_feats.shape[0], out.shape[-1]))
