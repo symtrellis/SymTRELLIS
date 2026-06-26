@@ -11,17 +11,16 @@ import torch
 
 from symtrellis.flow import AffineFlowStep, BaseFlowPredictor, BaseInitialNoiseSampler
 
-
 # Per-channel de-normalization constants for TRELLIS.2 shape sparse latents.
 # Sparse-structure latents are used directly and do not use these constants.
 # fmt: off
-SHAPE_LATENT_MEAN = [
+TRELLIS2_SHAPE_LATENT_MEAN = [
      0.781296,  0.018091, -0.495192, -0.558457,  1.060530,  0.093252,  1.518149, -0.933218,
     -0.732996,  2.604095, -0.118341, -2.143904,  0.495076, -2.179512, -2.130751, -0.996944,
      0.261421, -2.217463,  1.260067, -0.150213,  3.790713,  1.481266, -1.046058, -1.523667,
     -0.059621,  2.220780,  1.621212,  0.877230,  0.567247, -3.175944, -3.186688,  1.578665,
 ]
-SHAPE_LATENT_STD = [
+TRELLIS2_SHAPE_LATENT_STD = [
      5.972266,  4.706852,  5.445010,  5.209927,  5.320220,  4.547237,  5.020802,  5.444004,
      5.226681,  5.683095,  4.831436,  5.286469,  5.652043,  5.367606,  5.525084,  4.730578,
      4.805265,  5.124013,  5.530808,  5.619001,  5.103930,  5.417670,  5.269677,  5.547194,
@@ -73,7 +72,7 @@ class TRELLIS2FlowPredictor(BaseFlowPredictor):
         return v_pred
 
 
-class SparseStructureLatentNoiseSampler(BaseInitialNoiseSampler):
+class TRELLIS2SparseStructureLatentNoiseSampler(BaseInitialNoiseSampler):
     """Sample dense TRELLIS.2 sparse-structure latent noise.
 
     The sparse-structure stage uses a dense latent tensor with layout
@@ -105,7 +104,7 @@ class SparseStructureLatentNoiseSampler(BaseInitialNoiseSampler):
         return noise
 
 
-class ShapeLatentNoiseSampler(BaseInitialNoiseSampler):
+class TRELLIS2ShapeLatentNoiseSampler(BaseInitialNoiseSampler):
     """Sample TRELLIS.2 shape sparse latent noise.
 
     The shape stage uses a sparse tensor object with:
@@ -151,7 +150,7 @@ class ShapeLatentNoiseSampler(BaseInitialNoiseSampler):
         return sp_class(feats=feats, coords=coords)
 
 
-def sparse_structure_latent_to_sparse_view(
+def trellis2_sparse_structure_latent_to_sparse_view(
     sparse_structure_latent: torch.Tensor,
     coords: torch.Tensor,
 ):
@@ -176,7 +175,7 @@ def sparse_structure_latent_to_sparse_view(
     return sparse_view
 
 
-def sparse_view_to_sparse_structure_latent(
+def trellis2_sparse_view_to_sparse_structure_latent(
     sparse_view: torch.Tensor,
     coords: torch.Tensor,
     grid_size: int,
@@ -215,7 +214,7 @@ def sparse_view_to_sparse_structure_latent(
     return sparse_structure_latent.permute(0, 4, 1, 2, 3)
 
 
-def shape_latent_to_sparse_view(
+def trellis2_shape_latent_to_sparse_view(
     shape_latent,
     mean: Optional[torch.Tensor] = None,
     std: Optional[torch.Tensor] = None,
@@ -233,14 +232,14 @@ def shape_latent_to_sparse_view(
     device = shape_latent.feats.device
     dtype = shape_latent.feats.dtype
     if mean is None:
-        mean = torch.tensor(SHAPE_LATENT_MEAN, device=device, dtype=dtype)[None]
+        mean = torch.tensor(TRELLIS2_SHAPE_LATENT_MEAN, device=device, dtype=dtype)[None]
     if std is None:
-        std = torch.tensor(SHAPE_LATENT_STD, device=device, dtype=dtype)[None]
+        std = torch.tensor(TRELLIS2_SHAPE_LATENT_STD, device=device, dtype=dtype)[None]
 
     return shape_latent.feats * std + mean
 
 
-def shape_sparse_view_to_latent(
+def trellis2_shape_sparse_view_to_latent(
     sparse_view: torch.Tensor,
     coords: torch.Tensor,
     sp_class: Type,
@@ -262,14 +261,14 @@ def shape_sparse_view_to_latent(
     device = sparse_view.device
     dtype = sparse_view.dtype
     if mean is None:
-        mean = torch.tensor(SHAPE_LATENT_MEAN, device=device, dtype=dtype)[None]
+        mean = torch.tensor(TRELLIS2_SHAPE_LATENT_MEAN, device=device, dtype=dtype)[None]
     if std is None:
-        std = torch.tensor(SHAPE_LATENT_STD, device=device, dtype=dtype)[None]
+        std = torch.tensor(TRELLIS2_SHAPE_LATENT_STD, device=device, dtype=dtype)[None]
 
     return sp_class(feats=(sparse_view - mean) / std, coords=coords)
 
 
-def dense_grid_coords(batch_size: int, grid_size: int, device: torch.device | str) -> torch.Tensor:
+def trellis2_dense_grid_coords(batch_size: int, grid_size: int, device: torch.device | str) -> torch.Tensor:
     """Build full dense-grid coordinates in `[batch, x, y, z]` format.
 
     This is used by the dense sparse-structure stage when every voxel in the
@@ -293,7 +292,7 @@ def dense_grid_coords(batch_size: int, grid_size: int, device: torch.device | st
     return torch.cat([batch_ids, grid], dim=1).to(dtype=torch.int32)
 
 
-def sparse_structure_logits_to_coords(
+def trellis2_sparse_structure_logits_to_coords(
     logits: torch.Tensor,
     target_resolution: int,
 ) -> torch.Tensor:
@@ -314,15 +313,15 @@ def sparse_structure_logits_to_coords(
 
 
 __all__ = [
-    "SHAPE_LATENT_MEAN",
-    "SHAPE_LATENT_STD",
-    "ShapeLatentNoiseSampler",
-    "SparseStructureLatentNoiseSampler",
+    "TRELLIS2_SHAPE_LATENT_MEAN",
+    "TRELLIS2_SHAPE_LATENT_STD",
     "TRELLIS2FlowPredictor",
-    "dense_grid_coords",
-    "shape_latent_to_sparse_view",
-    "shape_sparse_view_to_latent",
-    "sparse_structure_latent_to_sparse_view",
-    "sparse_structure_logits_to_coords",
-    "sparse_view_to_sparse_structure_latent",
+    "TRELLIS2ShapeLatentNoiseSampler",
+    "TRELLIS2SparseStructureLatentNoiseSampler",
+    "trellis2_dense_grid_coords",
+    "trellis2_shape_latent_to_sparse_view",
+    "trellis2_shape_sparse_view_to_latent",
+    "trellis2_sparse_structure_latent_to_sparse_view",
+    "trellis2_sparse_structure_logits_to_coords",
+    "trellis2_sparse_view_to_sparse_structure_latent",
 ]
