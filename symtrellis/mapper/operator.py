@@ -8,13 +8,13 @@ This file uses two index spaces:
    and num_dst, not the original sparse feature row count N.
 
 2. Original feature row space.
-   SymmetryProjector uses rows_src and rows_dst to gather from and scatter back
-   to the same original feature tensor feats with shape [N, C].
+   SymmetryProjector stores rows_src, rows_dst, and the matching
+   LinearCoefficient for one complete inference-time projection operator.
 
 Data flow:
     feats[N, C]
         -> feats[rows_src]              # [num_src, C]
-        -> LinearCoefficient.apply      # [num_dst, C]
+        -> coeff.apply                  # [num_dst, C]
         -> index_add by rows_dst        # [N, C]
 
 rows_src and rows_dst may contain duplicates. Duplicates are expected when
@@ -285,15 +285,21 @@ def conjugate_gradient(
 
 class SymmetryProjector:
     """
-    Cached gather/scatter rows for self symmetry projection.
+    Complete self-symmetry projection operator for inference.
 
-    This projector only handles self-projection: rows_src and rows_dst both
-    index the same original feature tensor feats [N, C].
+    This projector stores both the original-row gather/scatter indices and the
+    matching relation-expanded LinearCoefficient. rows_src, rows_dst, and coeff
+    must use the same relation-expanded ordering.
+
+    It only handles self-projection: rows_src and rows_dst both index the same
+    original feature tensor feats [N, C].
 
     Args:
       num_rows: N, number of original sparse feature rows.
       rows_src: [num_src], rows gathered from feats before applying coeff.
       rows_dst: [num_dst], rows receiving projected dst contributions.
+      coeff: relation-expanded src-to-dst map with coeff.num_src ==
+        len(rows_src) and coeff.num_dst == len(rows_dst).
 
     rows_src and rows_dst may repeat. Repeated dst rows are summed and then
     averaged by counts_dst. Rows with no dst contribution output zero when
@@ -305,16 +311,17 @@ class SymmetryProjector:
         num_rows: int,
         rows_src: torch.Tensor,
         rows_dst: torch.Tensor,
+        coeff: LinearCoefficient,
     ) -> None:
         self.num_rows = num_rows
         self.rows_src = rows_src
         self.rows_dst = rows_dst
+        self.coeff = coeff
         self.counts_dst = torch.bincount(self.rows_dst, minlength=self.num_rows)
 
     def forward_project(
         self,
         feats: torch.Tensor,
-        coeff: LinearCoefficient,
         self_include: bool = False,
     ) -> torch.Tensor:
         """
@@ -322,8 +329,6 @@ class SymmetryProjector:
 
         Args:
           feats: [N, C] original sparse feature rows.
-          coeff: relation-expanded map with coeff.num_src == len(rows_src) and
-            coeff.num_dst == len(rows_dst).
           self_include: if True, include each original row as one extra
             contribution before averaging.
 
@@ -334,7 +339,7 @@ class SymmetryProjector:
         feats_src = feats[self.rows_src]
 
         # Map src entries to relation-expanded dst entries.
-        feats_dst = coeff.apply(feats_src)
+        feats_dst = self.coeff.apply(feats_src)
 
         # Scatter/add dst entries back to original rows.
         sum_feats = torch.zeros_like(feats)
@@ -351,7 +356,6 @@ class SymmetryProjector:
     def least_square_project(
         self,
         feats: torch.Tensor,
-        coeff: LinearCoefficient,
         cg_max_iter: int = 10,
         cg_tol: float = 1e-4,
         verbose: bool = False,
@@ -368,7 +372,6 @@ class SymmetryProjector:
 
         Args:
           feats: [N, C] original sparse feature rows.
-          coeff: relation-expanded src-to-dst map.
 
         Returns:
           projected_feats: [N, C].
@@ -382,7 +385,7 @@ class SymmetryProjector:
         def P(x: torch.Tensor) -> torch.Tensor:
             # Forward projection: gather rows, apply coeff, scatter back.
             feats_src = x[self.rows_src]
-            feats_dst = coeff.apply(feats_src)
+            feats_dst = self.coeff.apply(feats_src)
             y = x.clone() if self_include else torch.zeros_like(x)
             y.index_add_(0, self.rows_dst, feats_dst)
             return y * weight_inv
@@ -391,7 +394,7 @@ class SymmetryProjector:
             # Adjoint projection used in the normal equation P^T P c = P^T feats.
             y_weighted = y * weight_inv
             feats_dst = y_weighted[self.rows_dst]
-            feats_src = coeff.apply_transposed(feats_dst)
+            feats_src = self.coeff.apply_transposed(feats_dst)
             x_new = y_weighted.clone() if self_include else torch.zeros_like(y_weighted)
             x_new.index_add_(0, self.rows_src, feats_src)
             return x_new
