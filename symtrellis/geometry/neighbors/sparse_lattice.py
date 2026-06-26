@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
+import math
 import threading
 
 import torch
-from torch.utils.cpp_extension import load
 
 
 _EXT = None
@@ -24,26 +22,9 @@ def _load_sparse_lattice_ext():
         if _EXT is not None:
             return _EXT
 
-        this_dir = os.path.dirname(os.path.abspath(__file__))
-        ext_dir = os.path.join(this_dir, "sparse_lattice_ext")
-        build_dir = os.environ.get(
-            "SYMTRELLIS_SPARSE_LATTICE_BUILD_DIR",
-            os.path.join(tempfile.gettempdir(), "symtrellis_sparse_lattice_ext"),
-        )
-        os.makedirs(build_dir, exist_ok=True)
+        from . import _sparse_lattice_ext
 
-        _EXT = load(
-            name="symtrellis_sparse_lattice_ext",
-            sources=[
-                os.path.join(ext_dir, "bindings.cpp"),
-                os.path.join(ext_dir, "radius_nbr_edges_sparse_lattice.cu"),
-            ],
-            build_directory=build_dir,
-            extra_cflags=["-O3"],
-            extra_cuda_cflags=["-O3"],
-            with_cuda=True,
-            verbose=bool(int(os.environ.get("SYMTRELLIS_EXT_VERBOSE", "0"))),
-        )
+        _EXT = _sparse_lattice_ext
         return _EXT
 
 
@@ -91,23 +72,23 @@ def radius_nbr_edges_sparse_lattice(
         raise TypeError("nbr_offsets must be int32")
     if coord_min.dtype != torch.int32:
         raise TypeError("coord_min must be int32")
-    if radius <= 0.0:
-        raise ValueError("radius must be positive")
+    radius_f = float(radius)
+    if not math.isfinite(radius_f) or radius_f <= 0.0:
+        raise ValueError("radius must be finite and positive")
 
     device = query_pos.device
-    if not device.type == "cuda":
-        raise NotImplementedError("radius_nbr_edges_sparse_lattice currently has only a CUDA backend")
+    if device.type not in ("cpu", "cuda"):
+        raise NotImplementedError("radius_nbr_edges_sparse_lattice supports CPU and CUDA tensors")
 
     for name, tensor in (
         ("query_bid", query_bid),
         ("key_coords", key_coords),
         ("key_bid", key_bid),
+        ("nbr_offsets", nbr_offsets),
+        ("coord_min", coord_min),
     ):
         if tensor.device != device:
-            raise ValueError(f"{name} must be on the same CUDA device as query_pos")
-
-    nbr_offsets = nbr_offsets.to(device=device, dtype=torch.int32, non_blocking=True)
-    coord_min = coord_min.to(device=device, dtype=torch.int32, non_blocking=True)
+            raise ValueError(f"{name} must be on the same device as query_pos")
 
     Nq = int(query_pos.shape[0])
     Nk = int(key_coords.shape[0])
@@ -124,15 +105,26 @@ def radius_nbr_edges_sparse_lattice(
     coord_min = coord_min.contiguous()
 
     ext = _load_sparse_lattice_ext()
-    kids_by_offset = ext.radius_nbr_kids_by_offset_sparse_lattice_cuda(
-        query_pos,
-        query_bid,
-        key_coords,
-        key_bid,
-        float(radius),
-        nbr_offsets,
-        coord_min,
-    )
+    if device.type == "cpu":
+        kids_by_offset = ext.radius_nbr_kids_by_offset_sparse_lattice_cpu(
+            query_pos,
+            query_bid,
+            key_coords,
+            key_bid,
+            radius_f,
+            nbr_offsets,
+            coord_min,
+        )
+    else:
+        kids_by_offset = ext.radius_nbr_kids_by_offset_sparse_lattice_cuda(
+            query_pos,
+            query_bid,
+            key_coords,
+            key_bid,
+            radius_f,
+            nbr_offsets,
+            coord_min,
+        )
 
     mask = kids_by_offset >= 0
     qids, _ = mask.nonzero(as_tuple=True)
