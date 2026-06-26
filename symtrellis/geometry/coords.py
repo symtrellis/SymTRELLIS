@@ -4,8 +4,14 @@ import torch
 def pos2grid(pos: torch.Tensor, grid_size: int) -> torch.Tensor:
     """Quantize normalized positions to integer grid coordinates.
 
+    This is the standard latent-grid convention used by the supported
+    voxel-based generation models: integer grid coordinates index voxel
+    centers in a normalized canonical cube.
+
     Convention: grid index `i` denotes the cell center at
     `(i + 0.5) / grid_size - 0.5` in the fixed domain [-0.5, 0.5].
+    When adapting to a new voxel-based model, verify that its latent grid uses
+    the same voxel-center offset and normalized coordinate range.
 
     Args:
         pos: Float tensor with shape [..., 3]. Coordinates are in the
@@ -26,6 +32,12 @@ def pos2grid(pos: torch.Tensor, grid_size: int) -> torch.Tensor:
 def grid2pos(grid: torch.Tensor, grid_size: int) -> torch.Tensor:
     """Convert integer grid coordinates to normalized cell-center positions.
 
+    This is the standard latent-grid convention used by the supported
+    voxel-based generation models: integer grid coordinates index voxel
+    centers in a normalized canonical cube.
+    When adapting to a new voxel-based model, verify that its latent grid uses
+    the same voxel-center offset and normalized coordinate range.
+
     Args:
         grid: Integer tensor with shape [..., 3]. Coordinates index grid cells
             in [0, grid_size - 1].
@@ -41,7 +53,7 @@ def grid2pos(grid: torch.Tensor, grid_size: int) -> torch.Tensor:
 
 def t_abs2grid(
     t_abs: torch.Tensor,
-    R_src2dst: torch.Tensor,
+    O: torch.Tensor,
     grid_size: int,
 ) -> torch.Tensor:
     """Convert a normalized-position translation to grid-index translation.
@@ -49,7 +61,7 @@ def t_abs2grid(
     The returned translation is compatible with transforms applied directly to
     integer grid coordinates:
 
-        grid_dst = grid_src @ R_src2dst.T + t_grid
+        grid_out = grid_in @ O.T + t_grid
 
     under the position convention used by `grid2pos`:
 
@@ -58,8 +70,8 @@ def t_abs2grid(
     Args:
         t_abs: Float tensor with shape [..., 3]. Translation in normalized
             position units.
-        R_src2dst: Float tensor with shape [..., 3, 3]. Rotation/reflection
-            from source coordinates to destination coordinates.
+        O: Float tensor with shape [..., 3, 3]. Orthogonal transform in the
+            same direction as `t_abs`.
         grid_size: Number of grid cells per axis. This function assumes the
             source and destination grids share the same cubic resolution.
 
@@ -67,6 +79,6 @@ def t_abs2grid(
         Float tensor with shape [..., 3]. Translation in grid-index units.
     """
     coeff = (grid_size - 1) * 0.5
-    t_grid = t_abs * grid_size + coeff * (1.0 - R_src2dst.sum(dim=-1))
+    t_grid = t_abs * grid_size + coeff * (1.0 - O.sum(dim=-1))
 
     return t_grid

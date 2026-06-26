@@ -140,7 +140,7 @@ class Swin3DLatentMapper(nn.Module):
         self,
         coords_src: torch.Tensor,
         coords_dst: torch.Tensor,
-        R_dst2src: torch.Tensor,
+        O_dst2src: torch.Tensor,
         t_dst2src: torch.Tensor,
         s_dst2src: torch.Tensor,
     ) -> LinearCoefficient:
@@ -149,7 +149,7 @@ class Swin3DLatentMapper(nn.Module):
         Args:
             coords_src: [Nsrc, 4] int32 source sparse coordinates.
             coords_dst: [Ndst, 4] int32 destination sparse coordinates.
-            R_dst2src: [num_conditions, 3, 3] transform matrices from
+            O_dst2src: [num_conditions, 3, 3] orthogonal matrices from
                 destination coordinates to source coordinates.
             t_dst2src: [num_conditions, 3] translations in source grid-index
                 units.
@@ -167,7 +167,7 @@ class Swin3DLatentMapper(nn.Module):
         pos_dst = coords_dst[:, 1:].float()
 
         condition_rows_dst = coords_dst[:, 0].long()
-        pos_dst_in_src = torch.bmm(R_dst2src[condition_rows_dst], pos_dst[..., None])[..., 0] + t_dst2src[condition_rows_dst]
+        pos_dst_in_src = torch.bmm(O_dst2src[condition_rows_dst], pos_dst[..., None])[..., 0] + t_dst2src[condition_rows_dst]
         coords_dst_in_src = torch.cat(
             [
                 coords_dst[:, :1],
@@ -182,7 +182,7 @@ class Swin3DLatentMapper(nn.Module):
             window_size=self.cfg.window_size,
             shift_sequence=list(self.cfg.shift_sequence),
         )
-        condition = self.pose_conditioner(R_dst2src, t_dst2src, s_dst2src)
+        condition = self.pose_conditioner(O_dst2src, t_dst2src, s_dst2src)
 
         feats_src = self.in_norm(self.in_proj(self.pos_pe(pos_src)))
         feats_dst = self.in_norm(self.in_proj(self.pos_pe(pos_dst_in_src)))

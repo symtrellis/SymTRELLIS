@@ -8,12 +8,12 @@ from torch.nn.parameter import Buffer
 class PoseConditioner(nn.Module):
     """
     Build a pose condition vector from:
-      1. the first two columns of R as a 6D continuous orientation feature,
+      1. the first two columns of O as a 6D continuous orientation feature,
       2. a periodic Fourier encoding of t,
       3. a learned embedding of the discrete orientation sign.
 
     Inputs:
-      R: [B, 3, 3]
+      O: [B, 3, 3]
          Orthogonal transform matrix. May belong to O(3), not necessarily SO(3).
 
       t: [B, 3]
@@ -25,7 +25,7 @@ class PoseConditioner(nn.Module):
       s: [B]
          Discrete sign token in {0, 1}.
          Typically used to distinguish the two connected components of O(3),
-         e.g. det(R) < 0 and det(R) > 0.
+         e.g. det(O) < 0 and det(O) > 0.
 
     Fourier encoding:
       Frequencies are dyadic harmonics:
@@ -85,21 +85,21 @@ class PoseConditioner(nn.Module):
         layers.append(nn.Linear(d, self.condition_dim))
         self.mlp = nn.Sequential(*layers)
 
-    def forward(self, R: torch.Tensor, t: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+    def forward(self, O: torch.Tensor, t: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
         """
         Args:
-          R: [B, 3, 3]
+          O: [B, 3, 3]
           t: [B, 3], already represented in the intended periodic/grid-unit domain
           s: [B], integer token in {0, 1}
 
         Returns:
           condition: [B, condition_dim]
         """
-        assert R.ndim == 3 and R.shape[-2:] == (3, 3)
+        assert O.ndim == 3 and O.shape[-2:] == (3, 3)
         assert t.ndim == 2 and t.shape[1] == 3
         assert s.ndim == 1
 
-        r6 = torch.cat([R[:, :, 0], R[:, :, 1]], dim=1)  # [B, 6]
+        orient6 = torch.cat([O[:, :, 0], O[:, :, 1]], dim=1)  # [B, 6]
 
         tf = (2.0 * math.pi) * t[:, :, None] * self.t_freqs[None, None, :]  # [B, 3, F]
         t_feat = torch.cat([tf.sin(), tf.cos()], dim=1).reshape(t.shape[0], -1)  # [B, 6F]
@@ -109,5 +109,5 @@ class PoseConditioner(nn.Module):
 
         s_feat = self.sign_embed(s)
 
-        x = torch.cat([r6, t_feat, s_feat], dim=1)
+        x = torch.cat([orient6, t_feat, s_feat], dim=1)
         return self.mlp(x)  # [B, condition_dim]
