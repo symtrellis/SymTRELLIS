@@ -227,6 +227,36 @@ def trellis2_sparse_view_to_sparse_structure_latent(
     return sparse_structure_latent.permute(0, 4, 1, 2, 3)
 
 
+class TRELLIS2SparseStructureView:
+    """View adapter between TRELLIS.2 dense sparse-structure latent and sparse rows."""
+
+    def __init__(
+        self,
+        coords: torch.Tensor,
+        grid_size: int,
+        batch_size: int,
+    ) -> None:
+        self.coords = coords
+        self.grid_size = grid_size
+        self.batch_size = batch_size
+
+    def to_sparse_view(self, sparse_structure_latent: torch.Tensor) -> torch.Tensor:
+        """Gather `[B, C, G, G, G]` latent features into `[N, C]` sparse rows."""
+        return trellis2_sparse_structure_latent_to_sparse_view(
+            sparse_structure_latent=sparse_structure_latent,
+            coords=self.coords,
+        )
+
+    def to_original_view(self, sparse_view: torch.Tensor) -> torch.Tensor:
+        """Scatter `[N, C]` sparse rows back to `[B, C, G, G, G]` latent layout."""
+        return trellis2_sparse_view_to_sparse_structure_latent(
+            sparse_view=sparse_view,
+            coords=self.coords,
+            grid_size=self.grid_size,
+            batch_size=self.batch_size,
+        )
+
+
 def trellis2_shape_latent_to_sparse_view(
     shape_latent,
     mean: Optional[torch.Tensor] = None,
@@ -279,6 +309,30 @@ def trellis2_shape_sparse_view_to_latent(
         std = torch.tensor(TRELLIS2_SHAPE_LATENT_STD, device=device, dtype=dtype)[None]
 
     return sp_class(feats=(sparse_view - mean) / std, coords=coords)
+
+
+class TRELLIS2ShapeLatentView:
+    """View adapter between TRELLIS.2 shape `SparseTensor` and mapper sparse rows."""
+
+    def __init__(
+        self,
+        coords: torch.Tensor,
+        sp_class: Type,
+    ) -> None:
+        self.coords = coords
+        self.sp_class = sp_class
+
+    def to_sparse_view(self, shape_latent) -> torch.Tensor:
+        """Convert TRELLIS.2 normalized shape latent feats to `[N, C]` rows."""
+        return trellis2_shape_latent_to_sparse_view(shape_latent)
+
+    def to_original_view(self, sparse_view: torch.Tensor):
+        """Convert `[N, C]` rows back to TRELLIS.2 normalized shape latent."""
+        return trellis2_shape_sparse_view_to_latent(
+            sparse_view=sparse_view,
+            coords=self.coords,
+            sp_class=self.sp_class,
+        )
 
 
 def trellis2_dense_grid_coords(batch_size: int, grid_size: int, device: torch.device | str) -> torch.Tensor:
@@ -339,8 +393,10 @@ __all__ = [
     "TRELLIS2_SPARSE_STRUCTURE_RESCALE_T",
     "TRELLIS2_SPARSE_STRUCTURE_STEPS",
     "TRELLIS2FlowPredictor",
+    "TRELLIS2ShapeLatentView",
     "TRELLIS2ShapeLatentNoiseSampler",
     "TRELLIS2SparseStructureLatentNoiseSampler",
+    "TRELLIS2SparseStructureView",
     "trellis2_dense_grid_coords",
     "trellis2_shape_latent_to_sparse_view",
     "trellis2_shape_sparse_view_to_latent",

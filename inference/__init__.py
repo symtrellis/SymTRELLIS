@@ -10,8 +10,10 @@ from .trellis2 import (
     TRELLIS2_SHAPE_LATENT_MEAN,
     TRELLIS2_SHAPE_LATENT_STD,
     TRELLIS2FlowPredictor,
+    TRELLIS2ShapeLatentView,
     TRELLIS2ShapeLatentNoiseSampler,
     TRELLIS2SparseStructureLatentNoiseSampler,
+    TRELLIS2SparseStructureView,
     trellis2_dense_grid_coords,
     trellis2_shape_latent_to_sparse_view,
     trellis2_shape_sparse_view_to_latent,
@@ -22,8 +24,10 @@ from .trellis2 import (
 
 __all__ = [
     "TRELLIS2FlowPredictor",
+    "TRELLIS2ShapeLatentView",
     "TRELLIS2ShapeLatentNoiseSampler",
     "TRELLIS2SparseStructureLatentNoiseSampler",
+    "TRELLIS2SparseStructureView",
     "TRELLIS2_SHAPE_LATENT_MEAN",
     "TRELLIS2_SHAPE_LATENT_STD",
     "TRELLISFlowPredictor",

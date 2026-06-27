@@ -1,0 +1,9 @@
+[submodule "third_party/trellis"]
+	path = third_party/trellis
+	url = https://github.com/microsoft/TRELLIS.git
+[submodule "third_party/trellis2"]
+	path = third_party/trellis2
+	url = https://github.com/microsoft/TRELLIS.2.git
+[submodule "third_party/sam3d_objects"]
+	path = third_party/sam3d_objects
+	url = https://github.com/facebookresearch/sam-3d-objects.git
