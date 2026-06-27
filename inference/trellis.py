@@ -10,6 +10,19 @@ from .trellis2 import trellis2_sparse_structure_latent_to_sparse_view as trellis
 from .trellis2 import trellis2_sparse_structure_logits_to_coords as trellis_sparse_structure_logits_to_coords
 from .trellis2 import trellis2_sparse_view_to_sparse_structure_latent as trellis_sparse_view_to_sparse_structure_latent
 
+# Official TRELLIS sampler defaults expressed in SymTRELLIS flow/CFG convention.
+TRELLIS_SPARSE_STRUCTURE_STEPS = 25
+TRELLIS_SPARSE_STRUCTURE_RESCALE_T = 3.0
+TRELLIS_SPARSE_STRUCTURE_CFG_STRENGTH = 6.0
+TRELLIS_SPARSE_STRUCTURE_CFG_INTERVAL = (0.0, 0.5)
+TRELLIS_SPARSE_STRUCTURE_CFG_RESCALE = 0.0
+
+TRELLIS_SLAT_STEPS = 25
+TRELLIS_SLAT_RESCALE_T = 3.0
+TRELLIS_SLAT_CFG_STRENGTH = 6.0
+TRELLIS_SLAT_CFG_INTERVAL = (0.0, 0.5)
+TRELLIS_SLAT_CFG_RESCALE = 0.0
+
 
 class TRELLISFlowPredictor(BaseFlowPredictor):
     """Adapt a TRELLIS flow model to the repository's velocity convention.
@@ -61,6 +74,16 @@ class TRELLISFlowPredictor(BaseFlowPredictor):
 
 __all__ = [
     "TRELLISFlowPredictor",
+    "TRELLIS_SLAT_CFG_INTERVAL",
+    "TRELLIS_SLAT_CFG_RESCALE",
+    "TRELLIS_SLAT_CFG_STRENGTH",
+    "TRELLIS_SLAT_RESCALE_T",
+    "TRELLIS_SLAT_STEPS",
+    "TRELLIS_SPARSE_STRUCTURE_CFG_INTERVAL",
+    "TRELLIS_SPARSE_STRUCTURE_CFG_RESCALE",
+    "TRELLIS_SPARSE_STRUCTURE_CFG_STRENGTH",
+    "TRELLIS_SPARSE_STRUCTURE_RESCALE_T",
+    "TRELLIS_SPARSE_STRUCTURE_STEPS",
     "TRELLISSparseStructureLatentNoiseSampler",
     "trellis_dense_grid_coords",
     "trellis_sparse_structure_latent_to_sparse_view",
