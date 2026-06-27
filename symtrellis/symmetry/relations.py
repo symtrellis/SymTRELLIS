@@ -2,7 +2,7 @@ from typing import Sequence, Tuple
 
 import torch
 
-from ..geometry.coords import grid2pos, t_abs2grid
+from ..geometry import grid2pos, t_abs2grid
 
 
 def build_symmetry_relation_inputs(

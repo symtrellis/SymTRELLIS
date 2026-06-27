@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn.parameter import Buffer
 
-from ..geometry.neighbors import lattice_ball_offsets, radius_nbr_edges
+from ..geometry import lattice_ball_offsets, radius_nbr_edges
 from .attention.window_index import build_swin_indices
 from .blocks import Swin3DLatentMapperBlock
 from .config import Swin3DLatentMapperConfig, Swin3DLatentMapperScale, swin_3d_latent_mapper_config
