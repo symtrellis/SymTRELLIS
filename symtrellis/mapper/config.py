@@ -49,7 +49,7 @@ class Swin3DLatentMapperConfig:
 
     # Edge feature head.
     edge_feat_dim: int = 64
-    edge_hidden_dim: int = 128
+    edge_hidden_dim: int = 256
     edge_mlp_depth: int = 3
     edge_use_geom: bool = True
     edge_pe_num_bands: int = 6
@@ -58,7 +58,7 @@ class Swin3DLatentMapperConfig:
 
     # Linear coefficient head.
     latent_dim: int = 8
-    lowrank_rank: int = 8
+    lowrank_rank: int = 64
 
     # Neighbor search for coefficient edges.
     neighbor_radius: float = 2.0
@@ -100,7 +100,7 @@ class NeighborGraphLatentMapperConfig:
     # Edge feature head.
     edge_feat_dim: int = 64
     edge_hidden_dim: int = 256
-    edge_mlp_depth: int = 2
+    edge_mlp_depth: int = 3
     edge_use_geom: bool = True
     edge_pe_num_bands: int = 6
     edge_pe_freq_max: float = 0.5
