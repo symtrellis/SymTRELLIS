@@ -50,7 +50,7 @@ class Swin3DLatentMapperConfig:
     # Edge feature head.
     edge_feat_dim: int = 64
     edge_hidden_dim: int = 128
-    edge_mlp_depth: int = 2
+    edge_mlp_depth: int = 3
     edge_use_geom: bool = True
     edge_pe_num_bands: int = 6
     edge_pe_freq_max: float = 0.5
@@ -99,7 +99,7 @@ class NeighborGraphLatentMapperConfig:
 
     # Edge feature head.
     edge_feat_dim: int = 64
-    edge_hidden_dim: int = 128
+    edge_hidden_dim: int = 256
     edge_mlp_depth: int = 2
     edge_use_geom: bool = True
     edge_pe_num_bands: int = 6
@@ -108,7 +108,7 @@ class NeighborGraphLatentMapperConfig:
 
     # Linear coefficient head.
     latent_dim: int = 8
-    lowrank_rank: int = 8
+    lowrank_rank: int = 64
 
     # Neighbor search for graph attention and coefficient edges.
     neighbor_radius: float = 2.0
@@ -149,9 +149,10 @@ def swin_3d_latent_mapper_config(
             num_heads=6,
             depth=8,
             condition_dim=192,
-            edge_feat_dim=96,
+            edge_feat_dim=128,
+            edge_hidden_dim=384,
             latent_dim=latent_dim,
-            lowrank_rank=8 if lowrank_rank is None else lowrank_rank,
+            lowrank_rank=64 if lowrank_rank is None else lowrank_rank,
         )
 
     raise ValueError(f"Unknown Swin3DLatentMapper scale: {scale}")
@@ -192,9 +193,10 @@ def neighbor_graph_latent_mapper_config(
             num_heads=6,
             depth=8,
             condition_dim=192,
-            edge_feat_dim=96,
+            edge_feat_dim=128,
+            edge_hidden_dim=384,
             latent_dim=latent_dim,
-            lowrank_rank=8 if lowrank_rank is None else lowrank_rank,
+            lowrank_rank=64 if lowrank_rank is None else lowrank_rank,
         )
 
     raise ValueError(f"Unknown NeighborGraphLatentMapper scale: {scale}")
