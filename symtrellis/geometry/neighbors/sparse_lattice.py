@@ -3,31 +3,14 @@
 from __future__ import annotations
 
 import math
-import threading
+from typing import Optional, Tuple
 
 import torch
 
-_EXT = None
-_EXT_LOCK = threading.Lock()
+from .sparse_lattice_ext import _C
 
 
-def _load_sparse_lattice_ext():
-    global _EXT
-
-    if _EXT is not None:
-        return _EXT
-
-    with _EXT_LOCK:
-        if _EXT is not None:
-            return _EXT
-
-        from . import _sparse_lattice_ext
-
-        _EXT = _sparse_lattice_ext
-        return _EXT
-
-
-def _check_shape(name: str, tensor: torch.Tensor, shape: tuple[int | None, ...]) -> None:
+def _check_shape(name: str, tensor: torch.Tensor, shape: Tuple[Optional[int], ...]) -> None:
     if tensor.ndim != len(shape):
         raise ValueError(f"{name} must have {len(shape)} dimensions, got {tensor.ndim}")
 
@@ -44,7 +27,7 @@ def radius_nbr_edges_sparse_lattice(
     radius: float,
     nbr_offsets: torch.Tensor,
     coord_min: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Find radius-neighbor edges on a sparse integer lattice.
 
     This backend supports arbitrary int32 lattice coordinates, including
@@ -128,9 +111,8 @@ def radius_nbr_edges_sparse_lattice(
     nbr_offsets = nbr_offsets.contiguous()
     coord_min = coord_min.contiguous()
 
-    ext = _load_sparse_lattice_ext()
     if device.type == "cpu":
-        kids_by_offset = ext.radius_nbr_kids_by_offset_sparse_lattice_cpu(
+        kids_by_offset = _C.radius_nbr_kids_by_offset_sparse_lattice_cpu(
             query_pos,
             query_bid,
             key_coords,
@@ -140,7 +122,7 @@ def radius_nbr_edges_sparse_lattice(
             coord_min,
         )
     else:
-        kids_by_offset = ext.radius_nbr_kids_by_offset_sparse_lattice_cuda(
+        kids_by_offset = _C.radius_nbr_kids_by_offset_sparse_lattice_cuda(
             query_pos,
             query_bid,
             key_coords,
