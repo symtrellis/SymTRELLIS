@@ -1,0 +1,8 @@
+*
+
+!setup.py
+!symtrellis/
+!symtrellis/**
+!inference/
+!inference/**
+!.dockerignore
