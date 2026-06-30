@@ -82,6 +82,8 @@ class Trainer:
         self.scheduler: torch.optim.lr_scheduler.OneCycleLR
         self.scaler: GradScaler
         self.writer: SummaryWriter | None = None
+        self.coord_shift_generator = torch.Generator()
+        self.coord_shift_generator.manual_seed(self.config.coord_shift_seed)
 
         self.start_epoch = 0
         self.global_step = 0
@@ -97,6 +99,7 @@ class Trainer:
         self.rank = int(os.environ.get("RANK", "0"))
         self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
         self.local_rank = int(os.environ.get("LOCAL_RANK", self.rank))
+        self.coord_shift_generator.manual_seed(self.config.coord_shift_seed + self.rank)
         dist.init_process_group(backend=backend, rank=self.rank, world_size=self.world_size)
         self.process_group_initialized = True
 
@@ -216,53 +219,51 @@ class Trainer:
         accumulated_metrics: dict[str, torch.Tensor] | None = None
         accumulated_count = 0
 
-        try:
-            for batch in prefetcher:
-                if micro_step >= micro_batches_per_epoch:
-                    break
+        for batch in prefetcher:
+            if micro_step >= micro_batches_per_epoch:
+                break
 
-                should_sync = ((micro_step + 1) % self.config.accumulation_steps) == 0
-                sync_context = nullcontext() if should_sync else self.ddp_model.no_sync()
-                with sync_context:
-                    total_loss, metrics = self.compute_batch(batch)
-                    loss = total_loss / self.config.accumulation_steps
-                    self.scaler.scale(loss).backward()
+            should_sync = ((micro_step + 1) % self.config.accumulation_steps) == 0
+            sync_context = nullcontext() if should_sync else self.ddp_model.no_sync()
+            with sync_context:
+                total_loss, metrics = self.compute_batch(batch)
+                loss = total_loss / self.config.accumulation_steps
+                self.scaler.scale(loss).backward()
 
-                # Log metrics at the same cadence as optimizer updates: average within
-                # the local accumulation window first, then reduce across DDP ranks.
-                if accumulated_metrics is None:
-                    accumulated_metrics = {name: value.detach().float() for name, value in metrics.items()}
-                else:
-                    for name, value in metrics.items():
-                        accumulated_metrics[name] += value.detach().float()
-                accumulated_count += 1
+            # Log metrics at the same cadence as optimizer updates: average within
+            # the local accumulation window first, then reduce across DDP ranks.
+            if accumulated_metrics is None:
+                accumulated_metrics = {name: value.detach().float() for name, value in metrics.items()}
+            else:
+                for name, value in metrics.items():
+                    accumulated_metrics[name] += value.detach().float()
+            accumulated_count += 1
 
-                self.global_step += 1
-                micro_step += 1
-                if not should_sync:
-                    continue
+            self.global_step += 1
+            micro_step += 1
+            if not should_sync:
+                continue
 
-                if self.config.max_grad_norm > 0:
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), self.config.max_grad_norm)
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.optimizer.zero_grad(set_to_none=True)
-                self.scheduler.step()
-                self.update_step += 1
+            if self.config.max_grad_norm > 0:
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.ddp_model.parameters(), self.config.max_grad_norm)
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self.optimizer.zero_grad(set_to_none=True)
+            self.scheduler.step()
+            self.update_step += 1
 
-                metrics_log = self.reduce_metrics(accumulated_metrics, accumulated_count)
-                accumulated_metrics = None
-                accumulated_count = 0
+            metrics_log = self.reduce_metrics(accumulated_metrics, accumulated_count)
+            accumulated_metrics = None
+            accumulated_count = 0
 
-                if self.rank == 0 and self.update_step % self.config.log_interval == 0:
-                    metric_text = " ".join(f"{name} {value:.6f}" for name, value in metrics_log.items())
-                    print(f"epoch {epoch} global_step {self.global_step} update_step {self.update_step} {metric_text}")
-                    if self.writer is not None:
-                        for name, value in metrics_log.items():
-                            self.writer.add_scalar(f"train/{name}", value, self.update_step)
-        finally:
-            prefetcher.close()
+            if self.rank == 0 and self.update_step % self.config.log_interval == 0:
+                metric_text = " ".join(f"{name} {value:.6f}" for name, value in metrics_log.items())
+                print(f"epoch {epoch} global_step {self.global_step} update_step {self.update_step} {metric_text}")
+                if self.writer is not None:
+                    for name, value in metrics_log.items():
+                        self.writer.add_scalar(f"train/{name}", value, self.update_step)
+        prefetcher.close()
 
         dist.barrier()
         if self.rank == 0:
@@ -283,13 +284,49 @@ class Trainer:
                 O=batch["O_dst2src"],
                 grid_size=self.config.grid_size,
             )
+            coords_src = batch["coords_src"]
+            coords_dst = batch["coords_dst"]
+            use_coord_shift = self.ddp_model.training and self.config.train_coord_shift_range > 0
+
+            if use_coord_shift:
+                batch_size = batch["O_dst2src"].shape[0]
+                shift_low = -self.config.train_coord_shift_range
+                shift_high = self.config.train_coord_shift_range + 1
+                shift_src = torch.randint(
+                    shift_low,
+                    shift_high,
+                    (batch_size, 3),
+                    generator=self.coord_shift_generator,
+                    dtype=torch.int64,
+                ).to(device=self.device)
+                shift_dst = torch.randint(
+                    shift_low,
+                    shift_high,
+                    (batch_size, 3),
+                    generator=self.coord_shift_generator,
+                    dtype=torch.int64,
+                ).to(device=self.device)
+                src_coord_shift = shift_src[coords_src[:, 0].long()].to(dtype=coords_src.dtype)
+                dst_coord_shift = shift_dst[coords_dst[:, 0].long()].to(dtype=coords_dst.dtype)
+
+                # Train-only coordinate-frame translation. Restore batch coords before losses/decoders.
+                coords_src[:, 1:] += src_coord_shift
+                coords_dst[:, 1:] += dst_coord_shift
+                shift_src_float = shift_src.to(dtype=t_grid.dtype)
+                shift_dst_float = shift_dst.to(dtype=t_grid.dtype)
+                dst_shift_in_src = torch.bmm(batch["O_dst2src"], shift_dst_float[..., None])[..., 0]
+                t_grid = t_grid + shift_src_float - dst_shift_in_src
+
             coeff = self.ddp_model(
-                coords_src=batch["coords_src"],
-                coords_dst=batch["coords_dst"],
+                coords_src=coords_src,
+                coords_dst=coords_dst,
                 O_dst2src=batch["O_dst2src"],
                 t_dst2src=t_grid,
                 s_dst2src=batch["s_dst2src"],
             )
+            if use_coord_shift:
+                coords_src[:, 1:] -= src_coord_shift
+                coords_dst[:, 1:] -= dst_coord_shift
             prediction = coeff.apply(batch["feats_src"].to(dtype=coeff.dtype))
 
         target = batch["feats_dst"]
@@ -312,15 +349,13 @@ class Trainer:
         metric_count = 0
         prefetcher = Prefetcher(loader, self.device)
 
-        try:
-            with torch.no_grad():
-                for batch in prefetcher:
-                    _, metrics = self.compute_batch(batch)
-                    for name, value in metrics.items():
-                        metric_sums[name] = metric_sums.get(name, 0.0) + value.item()
-                    metric_count += 1
-        finally:
-            prefetcher.close()
+        with torch.no_grad():
+            for batch in prefetcher:
+                _, metrics = self.compute_batch(batch)
+                for name, value in metrics.items():
+                    metric_sums[name] = metric_sums.get(name, 0.0) + value.item()
+                metric_count += 1
+        prefetcher.close()
 
         # Eval metrics are averaged over all rank-local batches, then reduced across ranks.
         metrics_log = self.reduce_metrics(metric_sums, metric_count)

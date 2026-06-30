@@ -52,7 +52,9 @@ class TrainConfig:
     resume_checkpoint_path: str = ""
 
     seed: int = 114514
-    train_catalog_seed: int = 114514
+    train_catalog_seed: int = 123456
+    train_coord_shift_range: int = 512 # aumentation parameter so that the mapper extrapolate to larger range of grid
+    coord_shift_seed: int = 1919810
 
 
 ConfigT = TypeVar("ConfigT", bound=TrainConfig)
