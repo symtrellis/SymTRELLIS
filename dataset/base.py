@@ -11,7 +11,7 @@ def build_catalog(
     seed: int = 114514,
     chunk: int = 1,
     chunk_id: int = 0,
-) -> List[str]:
+) -> List[Union[str, Path]]:
     """Build a deterministic list of shape archive paths.
 
     Each shape archive is a `.zip` file containing multiple latent records for

@@ -64,14 +64,13 @@ PURE_PYTHON_PACKAGES=(
     tensorboard lpips rembg open_clip_torch objaverse astor onnxruntime optree roma
     point-cloud-utils seaborn==0.13.2 gradio==5.49.0 matplotlib plotly
     kornia timm zstandard einops iopath scikit-image plyfile pygltflib
+    ipycanvas ipyevents usd-core warp-lang
 )
 
 PURE_PYTHON_IMPORTS=(
-    black IPython notebook jupyterlab numpy scipy pandas PIL imageio cv2
-    trimesh open3d pymeshfix pyvista xatlas huggingface_hub transformers
-    safetensors easydict tensorboard lpips rembg open_clip objaverse astor
-    optree roma point_cloud_utils seaborn gradio matplotlib plotly kornia
-    timm zstandard einops iopath skimage plyfile utils3d
+    numpy scipy PIL imageio cv2 trimesh open3d xatlas huggingface_hub
+    transformers safetensors easydict lpips rembg open_clip onnxruntime
+    optree point_cloud_utils kornia timm skimage utils3d
 )
 
 STAGES=(
@@ -1127,12 +1126,12 @@ verify_pytorch3d() {
 
 verify_kaolin() {
     verify_torch_stack
-    verify_any_distribution kaolin
+    verify_imports kaolin
 }
 
 verify_gsplat() {
     verify_torch_stack
-    verify_any_distribution gsplat
+    verify_imports gsplat
 }
 
 verify_nvdiffrast() {
@@ -1157,12 +1156,12 @@ verify_cumesh() {
 
 verify_flexgemm() {
     verify_torch_stack
-    verify_any_distribution flexgemm FlexGEMM flex-gemm flex_gemm
+    verify_imports flex_gemm
 }
 
 verify_ovoxel() {
     verify_torch_stack
-    verify_any_distribution o-voxel o_voxel
+    verify_imports o_voxel
 }
 
 verify_symtrellis() {
