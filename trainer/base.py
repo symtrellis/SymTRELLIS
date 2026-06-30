@@ -1,4 +1,5 @@
 import os
+from contextlib import nullcontext
 from dataclasses import asdict, replace
 from typing import Any, Generic, TypeVar, cast
 
@@ -220,9 +221,12 @@ class Trainer:
                 if micro_step >= micro_batches_per_epoch:
                     break
 
-                total_loss, metrics = self.compute_batch(batch)
-                loss = total_loss / self.config.accumulation_steps
-                self.scaler.scale(loss).backward()
+                should_sync = ((micro_step + 1) % self.config.accumulation_steps) == 0
+                sync_context = nullcontext() if should_sync else self.ddp_model.no_sync()
+                with sync_context:
+                    total_loss, metrics = self.compute_batch(batch)
+                    loss = total_loss / self.config.accumulation_steps
+                    self.scaler.scale(loss).backward()
 
                 # Log metrics at the same cadence as optimizer updates: average within
                 # the local accumulation window first, then reduce across DDP ranks.
@@ -235,8 +239,7 @@ class Trainer:
 
                 self.global_step += 1
                 micro_step += 1
-                should_update = (micro_step % self.config.accumulation_steps) == 0
-                if not should_update:
+                if not should_sync:
                     continue
 
                 if self.config.max_grad_norm > 0:
