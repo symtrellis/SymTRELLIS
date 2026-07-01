@@ -36,7 +36,7 @@ KAOLIN_FIND_LINKS="${KAOLIN_FIND_LINKS:-}"
 TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-}"
 FLASH_ATTN_CUDA_KEY=""
 FLASH_ATTN_TORCH_KEY=""
-FLASH_ATTN_RELEASE_TAG=""
+FLASH_ATTN_RELEASE_TAG="${FLASH_ATTN_RELEASE_TAG:-}"
 FLASH_ATTN_INSTALL_MODE=""
 OVOXEL_WHEEL_NAME=""
 OVOXEL_WHEEL_URL=""
@@ -121,6 +121,7 @@ Environment overrides:
   OVOXEL_RELEASE_TAG      o-voxel GitHub release tag. Default: v0.0.1
   OVOXEL_REPO             o-voxel GitHub repository. Default: quantaji/o-voxel-gpu
   FLASH_ATTN_REPO         flash-attn GitHub repository. Default: Dao-AILab/flash-attention
+  FLASH_ATTN_RELEASE_TAG  Override flash-attn release tag, e.g. v2.7.4.post1
   XFORMERS_VERSION        Override the torch-derived xformers version.
   KAOLIN_FIND_LINKS       Override the NVIDIA kaolin wheel index URL.
   TORCH_CUDA_ARCH_LIST    Override the generated CUDA architecture list.
@@ -282,6 +283,37 @@ xformers_for_torch() {
     2.11.0 | 2.12.0 | 2.12.1) echo "0.0.35" ;;
     *) die "Unsupported torch version for xformers: $1. Add an xformers mapping first." ;;
     esac
+}
+
+flash_attn_tag_compatible_with_xformers() {
+    local tag="$1" min_version max_version
+    local major minor patch min_major min_minor min_patch max_major max_minor max_patch
+    local version_score min_score max_score
+
+    [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]] || return 1
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
+
+    case "$XFORMERS_VERSION" in
+    0.0.25.post1 | 0.0.26.post1) min_version="2.5.2"; max_version="2.5.6" ;;
+    0.0.27 | 0.0.27.post2) min_version="2.5.7"; max_version="2.5.7" ;;
+    0.0.28 | 0.0.28.post2 | 0.0.28.post3) min_version="2.6.3"; max_version="2.6.3" ;;
+    0.0.29.post3) min_version="2.7.1"; max_version="2.7.2" ;;
+    0.0.30) min_version="2.7.1"; max_version="2.7.4" ;;
+    0.0.31.post1) min_version="2.7.1"; max_version="2.8.0" ;;
+    0.0.32.post2) min_version="2.7.1"; max_version="2.8.2" ;;
+    0.0.33.post1 | 0.0.33.post2 | 0.0.34 | 0.0.35) min_version="2.7.1"; max_version="2.8.4" ;;
+    *) die "Unknown flash-attn compatibility range for xformers $XFORMERS_VERSION" ;;
+    esac
+
+    IFS='.' read -r min_major min_minor min_patch <<<"$min_version"
+    IFS='.' read -r max_major max_minor max_patch <<<"$max_version"
+    version_score=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))
+    min_score=$((10#$min_major * 10000 + 10#$min_minor * 100 + 10#$min_patch))
+    max_score=$((10#$max_major * 10000 + 10#$max_minor * 100 + 10#$max_patch))
+
+    ((version_score >= min_score && version_score <= max_score))
 }
 
 spconv_pkg_for_cuda() {
@@ -516,11 +548,52 @@ resolve_flash_attn_plan() {
     local api json current_tag="" current_prerelease=0 fallback_tag="" exact=0
     local asset exact_base exact_py
     section "Resolve flash-attn source release"
+    exact_base="${FLASH_ATTN_CUDA_KEY}${FLASH_ATTN_TORCH_KEY}cxx11abi"
+    exact_py="-${PYTHON_CP_TAG}-${PYTHON_CP_TAG}-linux_x86_64.whl"
+
+    if [[ -n "$FLASH_ATTN_RELEASE_TAG" ]]; then
+        if ! flash_attn_tag_compatible_with_xformers "$FLASH_ATTN_RELEASE_TAG"; then
+            cat >&2 <<EOF
+FLASH_ATTN_RELEASE_TAG=${FLASH_ATTN_RELEASE_TAG} is incompatible with xformers ${XFORMERS_VERSION}
+EOF
+            exit 2
+        fi
+
+        api="https://api.github.com/repos/${FLASH_ATTN_REPO}/releases/tags/${FLASH_ATTN_RELEASE_TAG}"
+        json="$(mktemp)"
+        if ! curl -fsSL "$api" -o "$json"; then
+            rm -f "$json"
+            die "flash-attn release tag not found: ${FLASH_ATTN_RELEASE_TAG}"
+        fi
+        while IFS= read -r line; do
+            [[ "$line" == *'"name": "flash_attn-'* ]] || continue
+            asset="$(printf '%s\n' "$line" | sed -E 's/.*"name": "([^"]+)".*/\1/')"
+            if [[ "$asset" == flash_attn-*+"${exact_base}"FALSE"${exact_py}" ||
+                "$asset" == flash_attn-*+"${exact_base}"TRUE"${exact_py}" ]]; then
+                exact=1
+                break
+            fi
+        done <"$json"
+        rm -f "$json"
+
+        if [[ "$exact" -ne 1 ]]; then
+            cat >&2 <<EOF
+flash-attn release asset not found:
+  tag:       ${FLASH_ATTN_RELEASE_TAG}
+  cuda key:  ${FLASH_ATTN_CUDA_KEY}
+  torch key: ${FLASH_ATTN_TORCH_KEY}
+  python:    ${PYTHON_VERSION} (${PYTHON_CP_TAG})
+EOF
+            exit 2
+        fi
+
+        FLASH_ATTN_INSTALL_MODE="source build ${FLASH_ATTN_RELEASE_TAG} (user-specified; ${FLASH_ATTN_CUDA_KEY}, ${FLASH_ATTN_TORCH_KEY}, ${PYTHON_CP_TAG}; compatible with xformers ${XFORMERS_VERSION})"
+        return
+    fi
+
     api="https://api.github.com/repos/${FLASH_ATTN_REPO}/releases?per_page=100"
     json="$(mktemp)"
     curl -fsSL "$api" -o "$json"
-    exact_base="${FLASH_ATTN_CUDA_KEY}${FLASH_ATTN_TORCH_KEY}cxx11abi"
-    exact_py="-${PYTHON_CP_TAG}-${PYTHON_CP_TAG}-linux_x86_64.whl"
 
     while IFS= read -r line; do
         if [[ "$line" == *'"tag_name":'* ]]; then
@@ -537,6 +610,7 @@ resolve_flash_attn_plan() {
             continue
         }
         [[ "$current_prerelease" -eq 0 && "$line" == *'"name": "flash_attn-'* ]] || continue
+        flash_attn_tag_compatible_with_xformers "$current_tag" || continue
 
         asset="$(printf '%s\n' "$line" | sed -E 's/.*"name": "([^"]+)".*/\1/')"
         if [[ -z "$fallback_tag" && "$asset" == flash_attn-*+"${exact_base}"*linux_x86_64.whl ]]; then
