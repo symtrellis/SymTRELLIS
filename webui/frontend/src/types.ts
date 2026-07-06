@@ -28,6 +28,13 @@ export type DagEdge = {
 
 export type SymmetryFamily = 'axial' | 'T' | 'O' | 'I';
 
+export type SymmetryTuple = {
+  center: Vector3;
+  label: string;
+  majorAxis: Vector3;
+  minorAxis: Vector3;
+};
+
 export type RotationAxisCandidate = {
   axis: Vector3;
   center: Vector3;

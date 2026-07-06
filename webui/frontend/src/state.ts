@@ -6,11 +6,13 @@ import type {
   RotationAxisCandidate,
   SymmetryFamily,
   SymmetryOverlay,
+  SymmetryTuple,
   ThemeMode,
   Vector3,
 } from './types';
 
 export const themeStorageKey = 'symtrellis.theme';
+const secondaryAxisParallelThreshold = 0.98;
 
 export const initialCurrentNodeId: NodeId = 'detect_sym';
 
@@ -41,12 +43,7 @@ export function writeStoredTheme(theme: ThemeMode) {
 
 export type DetectionStatus = 'idle' | 'running' | 'ready' | 'empty';
 
-export type ProposedSymmetry = {
-  center: Vector3;
-  label: string;
-  majorAxis: Vector3;
-  minorAxis: Vector3;
-};
+export type ProposedSymmetry = SymmetryTuple;
 
 export type DetectionState = {
   c2Axes: FinerSymmetryResult['c2Axes'];
@@ -68,6 +65,7 @@ export type DetectionState = {
   selectedMinorItemId: string | null;
   selectedOverlayId: string | null;
   selectableOverlayIds: string[];
+  symmetryPreview: SymmetryTuple | null;
 };
 
 export type DetectionAction =
@@ -110,6 +108,7 @@ export const initialDetectionState: DetectionState = {
   selectedMinorItemId: null,
   selectedOverlayId: null,
   selectableOverlayIds: [],
+  symmetryPreview: null,
 };
 
 export function normalizeAxisInput(axis: Vector3): Vector3 {
@@ -146,6 +145,17 @@ export function minorAxisFromVerticalPlane(planeNormal: Vector3, majorAxis: Vect
     planeNormal[1] * majorAxis[2] - planeNormal[2] * majorAxis[1],
     planeNormal[2] * majorAxis[0] - planeNormal[0] * majorAxis[2],
     planeNormal[0] * majorAxis[1] - planeNormal[1] * majorAxis[0],
+  ]);
+}
+
+export function minorAxisFromSecondaryAxis(axis: Vector3, majorAxis: Vector3): Vector3 {
+  const major = normalizeAxisInput(majorAxis);
+  const axisDotMajor = axis[0] * major[0] + axis[1] * major[1] + axis[2] * major[2];
+
+  return normalizeAxisInput([
+    axis[0] - axisDotMajor * major[0],
+    axis[1] - axisDotMajor * major[1],
+    axis[2] - axisDotMajor * major[2],
   ]);
 }
 
@@ -200,7 +210,17 @@ export function detectionInstruction(state: DetectionState): string {
   }
 
   if (state.proposedSymmetry) {
-    return 'Review the locked symmetry tuple, then press Confirm.';
+    return 'Review the locked symmetry tuple and viewer preview, then press Confirm.';
+  }
+
+  if (state.family === 'T' || state.family === 'O' || state.family === 'I') {
+    const secondaryFold = state.family === 'T' ? 3 : state.family === 'O' ? 4 : 5;
+
+    if (state.selectableOverlayIds.length > 0) {
+      return `Select a non-primary C${secondaryFold} axis in the viewer, or keep the current minor axis. Then press Confirm proposed symmetry.`;
+    }
+
+    return `No valid secondary C${secondaryFold} axis is available. Edit the minor axis manually, then press Confirm proposed symmetry.`;
   }
 
   if (state.family !== 'axial') {
@@ -225,7 +245,7 @@ export function detectionInstruction(state: DetectionState): string {
 export function detectionReducer(state: DetectionState, action: DetectionAction): DetectionState {
   switch (action.type) {
     case 'majorDetectionStarted':
-      return { ...state, majorStatus: 'running', proposedSymmetry: null };
+      return { ...state, majorStatus: 'running', proposedSymmetry: null, symmetryPreview: null };
 
     case 'rotationAxesLoaded': {
       if (action.candidates.length === 0) {
@@ -238,6 +258,7 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
           selectableOverlayIds: [],
           selectedMajorCandidateId: null,
           selectedOverlayId: null,
+          symmetryPreview: null,
         };
       }
 
@@ -269,6 +290,7 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
         selectedMajorCandidateId: candidate.id,
         selectedMinorItemId: null,
         selectedOverlayId: candidate.id,
+        symmetryPreview: null,
       };
     }
 
@@ -286,14 +308,15 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
         selectedLabel: state.family ? labels[0] : state.selectedLabel,
         selectedMajorCandidateId: candidate.id,
         selectedOverlayId: candidate.id,
+        symmetryPreview: null,
       };
     }
 
     case 'majorAxisChanged':
-      return { ...state, majorAxis: action.axis, proposedSymmetry: null };
+      return { ...state, majorAxis: action.axis, proposedSymmetry: null, symmetryPreview: null };
 
     case 'centerChanged':
-      return { ...state, center: action.center, proposedSymmetry: null };
+      return { ...state, center: action.center, proposedSymmetry: null, symmetryPreview: null };
 
     case 'foldChanged': {
       const labels = state.family ? labelsForFamily(state.family, action.fold) : state.labels;
@@ -304,31 +327,90 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
         labels,
         proposedSymmetry: null,
         selectedLabel: state.family ? labels[0] : state.selectedLabel,
+        symmetryPreview: null,
       };
     }
 
     case 'majorAxisNormalized':
-      return { ...state, majorAxis: normalizeAxisInput(state.majorAxis), proposedSymmetry: null };
+      return {
+        ...state,
+        majorAxis: normalizeAxisInput(state.majorAxis),
+        proposedSymmetry: null,
+        symmetryPreview: null,
+      };
 
     case 'centerNormalized':
-      return { ...state, center: normalizeCenterInput(), proposedSymmetry: null };
+      return {
+        ...state,
+        center: normalizeCenterInput(),
+        proposedSymmetry: null,
+        symmetryPreview: null,
+      };
 
     case 'familyPicked': {
       const labels = labelsForFamily(action.family, state.fold);
 
+      if (action.family !== 'axial') {
+        const secondaryFold = action.family === 'T' ? 3 : action.family === 'O' ? 4 : 5;
+        const major = normalizeAxisInput(state.majorAxis);
+        const secondaryCandidates = state.rotationAxes.filter((candidate) => {
+          const axis = normalizeAxisInput(candidate.axis);
+          const dot =
+            Math.abs(axis[0] * major[0] + axis[1] * major[1] + axis[2] * major[2]);
+
+          return candidate.foldI === secondaryFold && dot < secondaryAxisParallelThreshold;
+        });
+        const selectedSecondary = secondaryCandidates[0];
+
+        return {
+          ...state,
+          c2Axes: [],
+          family: action.family,
+          finerStatus: 'idle',
+          labels,
+          minorAxis: selectedSecondary
+            ? minorAxisFromSecondaryAxis(selectedSecondary.axis, state.majorAxis)
+            : state.minorAxis,
+          overlays: secondaryCandidates.map((candidate) => ({
+            axis: candidate.axis,
+            center: candidate.center,
+            color: candidate.color,
+            fold: candidate.foldI,
+            id: candidate.id,
+            kind: 'rotation_axis',
+            label: `${candidate.foldI}`,
+          })),
+          proposedSymmetry: null,
+          reflectionPlanesContainingAxis: [],
+          reflectionPlanesPerpendicularToAxis: [],
+          selectableOverlayIds: secondaryCandidates.map((candidate) => candidate.id),
+          selectedLabel: labels[0],
+          selectedMinorItemId: selectedSecondary?.id ?? null,
+          selectedOverlayId: selectedSecondary?.id ?? null,
+          symmetryPreview: null,
+        };
+      }
+
       return {
         ...state,
+        c2Axes: [],
         family: action.family,
+        finerStatus: 'idle',
         labels,
+        overlays: [],
         proposedSymmetry: null,
+        reflectionPlanesContainingAxis: [],
+        reflectionPlanesPerpendicularToAxis: [],
+        selectableOverlayIds: [],
         selectedLabel: labels[0],
         selectedMinorItemId: null,
-        selectedOverlayId: state.selectedMajorCandidateId,
+        selectedOverlayId: null,
+        symmetryPreview: null,
       };
     }
 
     case 'finerDetectionStarted':
-      return { ...state, finerStatus: 'running', proposedSymmetry: null };
+      return { ...state, finerStatus: 'running', proposedSymmetry: null, symmetryPreview: null };
 
     case 'finerResultLoaded': {
       const majorOverlay: SymmetryOverlay = {
@@ -410,14 +492,20 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
         selectedLabel,
         selectedMinorItemId,
         selectedOverlayId: selectedMinorItemId ?? majorOverlay.id,
+        symmetryPreview: null,
       };
     }
 
     case 'labelPicked':
-      return { ...state, proposedSymmetry: null, selectedLabel: action.label };
+      return {
+        ...state,
+        proposedSymmetry: null,
+        selectedLabel: action.label,
+        symmetryPreview: null,
+      };
 
     case 'minorAxisChanged':
-      return { ...state, minorAxis: action.axis, proposedSymmetry: null };
+      return { ...state, minorAxis: action.axis, proposedSymmetry: null, symmetryPreview: null };
 
     case 'minorItemPicked': {
       const c2Axis = state.c2Axes.find((item) => item.id === action.itemId);
@@ -431,6 +519,7 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
         proposedSymmetry: null,
         selectedMinorItemId: action.itemId,
         selectedOverlayId: action.itemId,
+        symmetryPreview: null,
       };
     }
 
@@ -438,6 +527,26 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
       const c2Axis = state.c2Axes.find((item) => item.id === action.overlayId);
       const verticalPlane = state.reflectionPlanesContainingAxis.find((item) => item.id === action.overlayId);
       const majorCandidate = state.rotationAxes.find((item) => item.id === action.overlayId);
+
+      if ((state.family === 'T' || state.family === 'O' || state.family === 'I') && majorCandidate) {
+        const secondaryFold = state.family === 'T' ? 3 : state.family === 'O' ? 4 : 5;
+        const axis = normalizeAxisInput(majorCandidate.axis);
+        const major = normalizeAxisInput(state.majorAxis);
+        const dot = Math.abs(axis[0] * major[0] + axis[1] * major[1] + axis[2] * major[2]);
+
+        if (majorCandidate.foldI === secondaryFold && dot < secondaryAxisParallelThreshold) {
+          return {
+            ...state,
+            minorAxis: minorAxisFromSecondaryAxis(majorCandidate.axis, state.majorAxis),
+            proposedSymmetry: null,
+            selectedMinorItemId: majorCandidate.id,
+            selectedOverlayId: majorCandidate.id,
+            symmetryPreview: null,
+          };
+        }
+
+        return state;
+      }
 
       if (majorCandidate) {
         const labels = state.family ? labelsForFamily(state.family, majorCandidate.foldI) : state.labels;
@@ -452,6 +561,7 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
           selectedLabel: state.family ? labels[0] : state.selectedLabel,
           selectedMajorCandidateId: majorCandidate.id,
           selectedOverlayId: majorCandidate.id,
+          symmetryPreview: null,
         };
       }
 
@@ -462,6 +572,7 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
           proposedSymmetry: null,
           selectedMinorItemId: action.overlayId,
           selectedOverlayId: action.overlayId,
+          symmetryPreview: null,
         };
       }
 
@@ -472,6 +583,7 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
           proposedSymmetry: null,
           selectedMinorItemId: action.overlayId,
           selectedOverlayId: action.overlayId,
+          symmetryPreview: null,
         };
       }
 
@@ -479,27 +591,34 @@ export function detectionReducer(state: DetectionState, action: DetectionAction)
     }
 
     case 'minorAxisNormalized':
-      return { ...state, minorAxis: normalizeAxisInput(state.minorAxis), proposedSymmetry: null };
+      return {
+        ...state,
+        minorAxis: normalizeAxisInput(state.minorAxis),
+        proposedSymmetry: null,
+        symmetryPreview: null,
+      };
 
-    case 'proposeSymmetry':
+    case 'proposeSymmetry': {
+      const proposedSymmetry: ProposedSymmetry = {
+        center: [state.center[0], state.center[1], state.center[2]],
+        label: state.selectedLabel,
+        majorAxis: [state.majorAxis[0], state.majorAxis[1], state.majorAxis[2]],
+        minorAxis: [state.minorAxis[0], state.minorAxis[1], state.minorAxis[2]],
+      };
+
       return {
         ...state,
         c2Axes: [],
         overlays: [],
-        proposedSymmetry: {
-          center: [state.center[0], state.center[1], state.center[2]],
-          label: state.selectedLabel,
-          majorAxis: [state.majorAxis[0], state.majorAxis[1], state.majorAxis[2]],
-          minorAxis: [state.minorAxis[0], state.minorAxis[1], state.minorAxis[2]],
-        },
+        proposedSymmetry,
         reflectionPlanesContainingAxis: [],
         reflectionPlanesPerpendicularToAxis: [],
-        rotationAxes: [],
         selectableOverlayIds: [],
-        selectedMajorCandidateId: null,
         selectedMinorItemId: null,
         selectedOverlayId: null,
+        symmetryPreview: proposedSymmetry,
       };
+    }
 
     case 'confirmSymmetry':
       // TODO: Submit state.proposedSymmetry as the detect_adjust_symmetry node result

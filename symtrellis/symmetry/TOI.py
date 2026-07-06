@@ -127,12 +127,13 @@ OH_MIRROR_NORMALS = (
 # I / Ih
 # Canonical choice:
 #   ez is one C5 axis.
+#   the ez/ex plane contains one additional C5 axis.
 # =====================================================================
 
 # 6 C5 axes: one pole + one 5-ring
 I_C5_RING_R = 2.0 / SQRT5
 I_C5_RING_Z = 1.0 / SQRT5
-I_C5_RING_PHASE = PI / 10.0
+I_C5_RING_PHASE = 0.0
 
 I_C5_AXES = (
     (0.0, 0.0, 1.0),
@@ -144,7 +145,7 @@ I_C3_Z_LO = math.sqrt((5.0 - 2.0 * SQRT5) / 15.0)
 I_C3_Z_HI = math.sqrt((5.0 + 2.0 * SQRT5) / 15.0)
 I_C3_R_LO = math.sqrt((10.0 + 2.0 * SQRT5) / 15.0)
 I_C3_R_HI = math.sqrt((10.0 - 2.0 * SQRT5) / 15.0)
-I_C3_PHASE = 3.0 * PI / 10.0
+I_C3_PHASE = PI / 5.0
 
 I_C3_AXES = (
     *ring(5, I_C3_R_LO, I_C3_Z_LO, I_C3_PHASE),
@@ -158,15 +159,15 @@ I_C3_AXES = (
 # not the previous sin(36) / cos(36) pair.
 I_C2_EQ_R = 1.0
 I_C2_EQ_Z = 0.0
-I_C2_EQ_PHASE = 0.0
+I_C2_EQ_PHASE = -PI / 10.0
 
 I_C2_RING_A_R = math.sqrt((5.0 + SQRT5) / 10.0)
 I_C2_RING_A_Z = math.sqrt((5.0 - SQRT5) / 10.0)
-I_C2_RING_A_PHASE = 3.0 * PI / 10.0
+I_C2_RING_A_PHASE = PI / 5.0
 
 I_C2_RING_B_R = math.sqrt((5.0 - SQRT5) / 10.0)
 I_C2_RING_B_Z = math.sqrt((5.0 + SQRT5) / 10.0)
-I_C2_RING_B_PHASE = PI / 10.0
+I_C2_RING_B_PHASE = 0.0
 
 I_C2_AXES = (
     *ring(5, I_C2_EQ_R, I_C2_EQ_Z, I_C2_EQ_PHASE),

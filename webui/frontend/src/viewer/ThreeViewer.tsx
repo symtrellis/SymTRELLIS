@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import type { SymmetryOverlay, ThemeMode } from '../types';
+import type { SymmetryOverlay, SymmetryTuple, ThemeMode } from '../types';
 import {
   DEFAULT_CAMERA_DIRECTION,
   VIEW_GIZMO_RIGHT,
@@ -11,6 +11,7 @@ import {
   VIEW_GIZMO_TOP,
   applyViewerMaterial,
   createCanonicalBox,
+  createSymmetryPreviewGroup,
   createSymmetryOverlayGroup,
   createViewGizmo,
   createWorldAxes,
@@ -28,6 +29,7 @@ type ThreeViewerProps = {
   overlays: SymmetryOverlay[];
   selectableOverlayIds: string[];
   selectedOverlayId: string | null;
+  symmetryPreview: SymmetryTuple | null;
   theme: ThemeMode;
 };
 
@@ -42,6 +44,7 @@ type CameraAnimation = {
 
 type ViewerRuntime = {
   applyTheme: (theme: ThemeMode) => void;
+  setSymmetryPreview: (symmetry: SymmetryTuple | null) => void;
   setOverlays: (
     overlays: SymmetryOverlay[],
     selectedOverlayId: string | null,
@@ -54,6 +57,7 @@ export function ThreeViewer({
   overlays,
   selectableOverlayIds,
   selectedOverlayId,
+  symmetryPreview,
   theme,
 }: ThreeViewerProps) {
   const hostRef = useRef<HTMLElement>(null);
@@ -142,6 +146,10 @@ export function ThreeViewer({
     let symmetryPickables = symmetryOverlay.pickables;
     scene.add(symmetryOverlay.group);
 
+    let activeSymmetryPreview: SymmetryTuple | null = null;
+    let symmetryPreviewGroup = createSymmetryPreviewGroup(null, colors);
+    scene.add(symmetryPreviewGroup);
+
     let viewGizmo = createViewGizmo(colors);
     let gizmoMeshes = viewGizmo.pickables.map((pickable) => pickable.object);
     const raycaster = new THREE.Raycaster();
@@ -205,6 +213,8 @@ export function ThreeViewer({
       if (model) {
         applyViewerMaterial(model, colors.mesh);
       }
+
+      setSymmetryPreview(activeSymmetryPreview);
     };
 
     const setOverlays = (
@@ -223,7 +233,15 @@ export function ThreeViewer({
       scene.add(symmetryOverlay.group);
     };
 
-    runtimeRef.current = { applyTheme, setOverlays };
+    const setSymmetryPreview = (nextSymmetry: SymmetryTuple | null) => {
+      activeSymmetryPreview = nextSymmetry;
+      scene.remove(symmetryPreviewGroup);
+      disposeObject(symmetryPreviewGroup);
+      symmetryPreviewGroup = createSymmetryPreviewGroup(activeSymmetryPreview, colors);
+      scene.add(symmetryPreviewGroup);
+    };
+
+    runtimeRef.current = { applyTheme, setSymmetryPreview, setOverlays };
 
     const updateViewport = () => {
       const width = host.clientWidth;
@@ -457,6 +475,10 @@ export function ThreeViewer({
   useEffect(() => {
     runtimeRef.current?.setOverlays(overlays, selectedOverlayId, selectableOverlayIds);
   }, [overlays, selectableOverlayIds, selectedOverlayId]);
+
+  useEffect(() => {
+    runtimeRef.current?.setSymmetryPreview(symmetryPreview);
+  }, [symmetryPreview]);
 
   return (
     <main className="three-viewer" aria-label="3D viewer" data-viewer-theme={theme} ref={hostRef}>

@@ -41,6 +41,7 @@ export function AppLayout({
         selectableOverlayIds={detectionState.selectableOverlayIds}
         overlays={detectionState.overlays}
         selectedOverlayId={detectionState.selectedOverlayId}
+        symmetryPreview={detectionState.symmetryPreview}
         theme={theme}
       />
 
