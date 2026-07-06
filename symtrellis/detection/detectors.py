@@ -421,7 +421,7 @@ def detect_reflection_planes_containing_axis(
     Gphi: torch.Tensor,
     axis: torch.Tensor,
     q: torch.Tensor,
-    num_icp_iter: int = 60,
+    num_icp_iter: int = 120,
     num_icp_init: int = 1024,
     angle_thresh: float = 3.0,
     rel_dist_thresh: float = 0.05,

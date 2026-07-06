@@ -61,3 +61,57 @@ node_modules/
 dist-*/
 coverage/
 dockers/
+
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+# WebUI frontend
+webui/frontend/node_modules/
+webui/frontend/dist/
+webui/frontend/.vite/
+webui/frontend/.cache/
+webui/frontend/coverage/
+webui/frontend/playwright-report/
+webui/frontend/test-results/
+webui/frontend/*.tsbuildinfo
+
+# WebUI frontend logs
+webui/frontend/npm-debug.log*
+webui/frontend/yarn-debug.log*
+webui/frontend/yarn-error.log*
+webui/frontend/pnpm-debug.log*
+
+# WebUI local env
+webui/frontend/.env
+webui/frontend/.env.local
+webui/frontend/.env.*.local
+
+# WebUI backend runtime outputs, for later
+webui/backend/storage/
+webui/backend/exports/
+webui/backend/uploads/
+webui/backend/.cache/
