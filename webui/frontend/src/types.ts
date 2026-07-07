@@ -2,6 +2,19 @@ export type ThemeMode = 'light' | 'dark';
 
 export type Vector3 = [number, number, number];
 
+export type AppStage = 'model_selection' | 'dag';
+
+export type ModelId = 'trellis' | 'trellis2' | 'sam3d_object';
+
+export type ViewerContent =
+  | { kind: 'empty' }
+  | {
+      kind: 'glb';
+      material: 'neutral' | 'source';
+      orientation?: 'mock_test_glb';
+      url: string;
+    };
+
 export type NodeId =
   | 'img_cond'
   | 'nat_ss'

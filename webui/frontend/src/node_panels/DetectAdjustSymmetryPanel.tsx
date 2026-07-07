@@ -26,8 +26,8 @@ export function DetectAdjustSymmetryPanel({
   const canPropose = canProposeSymmetry(state);
 
   return (
-    <div className="detect-panel">
-      <section className="detect-section">
+    <div className="symmetry-panel">
+      <section className="symmetry-section">
         <button
           className="button button-neutral"
           disabled={majorRunning}
@@ -151,7 +151,7 @@ export function DetectAdjustSymmetryPanel({
         </div>
       </section>
 
-      <section className="detect-section">
+      <section className="symmetry-section">
         <div className="family-options">
           <button
             className={`choice-button${state.family === 'axial' ? ' choice-button--selected' : ''}`}
@@ -200,7 +200,7 @@ export function DetectAdjustSymmetryPanel({
       </section>
 
       {state.labels.length > 0 ? (
-        <section className="detect-section">
+        <section className="symmetry-section">
           <label className="select-row">
             <span className="field-label">Point group type</span>
             <select
@@ -221,7 +221,7 @@ export function DetectAdjustSymmetryPanel({
       ) : null}
 
       {state.family ? (
-        <section className="detect-section">
+        <section className="symmetry-section">
           <label className="field-row">
             <span className="field-label">minor</span>
             <span className="vector-inputs">
@@ -277,7 +277,7 @@ export function DetectAdjustSymmetryPanel({
       </button>
 
       {state.proposedSymmetry ? (
-        <section className="detect-section proposed-symmetry">
+        <section className="symmetry-section proposed-symmetry">
           <dl className="proposed-tuple">
             <div className="proposed-row">
               <dt>Point group label</dt>

@@ -24,7 +24,13 @@ TRELLIS2_SHAPE_LATENT_CFG_STRENGTH = 7.5
 TRELLIS2_SHAPE_LATENT_CFG_INTERVAL = (0.0, 0.4)
 TRELLIS2_SHAPE_LATENT_CFG_RESCALE = 0.5
 
-# Per-channel de-normalization constants for TRELLIS.2 shape sparse latents.
+TRELLIS2_TEXTURE_LATENT_STEPS = 12
+TRELLIS2_TEXTURE_LATENT_RESCALE_T = 3.0
+TRELLIS2_TEXTURE_LATENT_CFG_STRENGTH = 1.0
+TRELLIS2_TEXTURE_LATENT_CFG_INTERVAL = (0.1, 0.4)
+TRELLIS2_TEXTURE_LATENT_CFG_RESCALE = 0.0
+
+# Per-channel de-normalization constants for TRELLIS.2 shape and texture sparse latents.
 # Sparse-structure latents are used directly and do not use these constants.
 # fmt: off
 TRELLIS2_SHAPE_LATENT_MEAN = [
@@ -38,6 +44,19 @@ TRELLIS2_SHAPE_LATENT_STD = [
      5.226681,  5.683095,  4.831436,  5.286469,  5.652043,  5.367606,  5.525084,  4.730578,
      4.805265,  5.124013,  5.530808,  5.619001,  5.103930,  5.417670,  5.269677,  5.547194,
      5.634698,  5.235274,  6.110351,  5.511298,  6.237273,  4.879207,  5.347008,  5.405691,
+]
+
+TRELLIS2_TEXTURE_LATENT_MEAN = [
+     3.501659,  2.212398,  2.226094,  0.251093, -0.026248, -0.687364,  0.439898, -0.928075,
+     0.029398, -0.339596, -0.869527,  1.038479, -0.972385,  0.126042, -1.129303,  0.455149,
+    -1.209521,  2.069067,  0.544735,  2.569128, -0.323407,  2.293000, -1.925608, -1.217717,
+     1.213905,  0.971588, -0.023631,  0.106750,  2.021786,  0.250524, -0.662387, -0.768862,
+]
+TRELLIS2_TEXTURE_LATENT_STD = [
+     2.665652,  2.743913,  2.765121,  2.595319,  3.037293,  2.291316,  2.144656,  2.911822,
+     2.969419,  2.501689,  2.154811,  3.163343,  2.621215,  2.381943,  3.186697,  3.021588,
+     2.295916,  3.234985,  3.233086,  2.260140,  2.874801,  2.810596,  3.292720,  2.674999,
+     2.680878,  2.372054,  2.451546,  2.353556,  2.995195,  2.379849,  2.786195,  2.775190,
 ]
 # fmt: on
 
@@ -60,7 +79,7 @@ class TRELLIS2FlowPredictor(BaseFlowPredictor):
 
         Args:
             step: Current flow state. `step.x_t` is either dense sparse-structure
-                latent or TRELLIS.2 `SparseTensor` shape latent.
+                latent or TRELLIS.2 `SparseTensor` latent.
             cond: TRELLIS.2 conditioning tensor passed to the wrapped model.
             **kwargs: Extra TRELLIS.2 model arguments.
 
@@ -117,50 +136,28 @@ class TRELLIS2SparseStructureLatentNoiseSampler(BaseInitialNoiseSampler):
         return noise
 
 
-class TRELLIS2ShapeLatentNoiseSampler(BaseInitialNoiseSampler):
-    """Sample TRELLIS.2 shape sparse latent noise.
+def trellis2_dense_grid_coords(batch_size: int, grid_size: int, device: torch.device | str) -> torch.Tensor:
+    """Build full dense-grid coordinates in `[batch, x, y, z]` format.
 
-    The shape stage uses a sparse tensor object with:
+    This is used by the dense sparse-structure stage when every voxel in the
+    latent grid is present and needs a row id for sparse-view projection.
 
-        feats: [num_coords, feat_dim]
-        coords: [num_coords, 4], where columns are [batch, x, y, z]
-
-    `sp_class` is expected to be TRELLIS.2's sparse tensor class.
+    Returns:
+        Int32 tensor with shape `[batch_size * grid_size**3, 4]`.
     """
+    grid = torch.stack(
+        torch.meshgrid(
+            torch.arange(grid_size, device=device),
+            torch.arange(grid_size, device=device),
+            torch.arange(grid_size, device=device),
+            indexing="ij",
+        ),
+        dim=-1,
+    ).reshape(-1, 3)
+    batch_ids = torch.arange(batch_size, device=device)[:, None].expand(batch_size, grid.shape[0]).reshape(-1, 1)
+    grid = grid.repeat(batch_size, 1)
 
-    def sample(
-        self,
-        sp_class: Type,
-        coords: torch.Tensor,
-        feat_dim: int,
-        grid_size: int,
-        seed: Optional[int],
-        device: str,
-        **kwargs,
-    ):
-        """Return a sparse latent sample in the provided `sp_class` container."""
-        if seed is None:
-            # Without a seed, sample each sparse row independently.
-            feats = torch.randn(
-                coords.shape[0],
-                feat_dim,
-                device=device,
-            )
-        else:
-            # With a seed, sample a dense template and gather by sparse coords.
-            g = torch.Generator(device=device)
-            g.manual_seed(seed)
-            feats_template = torch.randn(
-                grid_size,
-                grid_size,
-                grid_size,
-                feat_dim,
-                generator=g,
-                device=device,
-            )
-            feats = feats_template[coords[:, 1], coords[:, 2], coords[:, 3]]
-
-        return sp_class(feats=feats, coords=coords)
+    return torch.cat([batch_ids, grid], dim=1).to(dtype=torch.int32)
 
 
 def trellis2_sparse_structure_latent_to_sparse_view(
@@ -227,6 +224,26 @@ def trellis2_sparse_view_to_sparse_structure_latent(
     return sparse_structure_latent.permute(0, 4, 1, 2, 3)
 
 
+def trellis2_sparse_structure_logits_to_coords(
+    logits: torch.Tensor,
+    target_resolution: int,
+) -> torch.Tensor:
+    """Convert sparse-structure decoder logits to shape-stage coordinates.
+
+    Args:
+        logits: Occupancy logits with shape `[B, 1, G, G, G]`.
+        target_resolution: Target sparse shape-latent grid resolution.
+
+    Returns:
+        Int32 coordinates `[N, 4]` with columns `[batch, x, y, z]`.
+    """
+    occ = logits > 0
+    pool_size = logits.shape[-1] // target_resolution
+    occ = torch.nn.functional.max_pool3d(occ.float(), pool_size, pool_size, 0) > 0.5
+
+    return torch.argwhere(occ)[:, [0, 2, 3, 4]].to(dtype=torch.int32)
+
+
 class TRELLIS2SparseStructureView:
     """View adapter between TRELLIS.2 dense sparse-structure latent and sparse rows."""
 
@@ -255,6 +272,55 @@ class TRELLIS2SparseStructureView:
             grid_size=self.grid_size,
             batch_size=self.batch_size,
         )
+
+
+class TRELLIS2SparseLatentNoiseSampler(BaseInitialNoiseSampler):
+    """Sample TRELLIS.2 sparse latent noise.
+
+    Shape and texture stages use sparse tensor objects with:
+
+        feats: [num_coords, feat_dim]
+        coords: [num_coords, 4], where columns are [batch, x, y, z]
+
+    `sp_class` is expected to be TRELLIS.2's sparse tensor class.
+    """
+
+    def sample(
+        self,
+        sp_class: Type,
+        coords: torch.Tensor,
+        feat_dim: int,
+        grid_size: int,
+        seed: Optional[int],
+        device: str,
+        **kwargs,
+    ):
+        """Return a sparse latent sample in the provided `sp_class` container."""
+        if seed is None:
+            # Without a seed, sample each sparse row independently.
+            feats = torch.randn(
+                coords.shape[0],
+                feat_dim,
+                device=device,
+            )
+        else:
+            # With a seed, sample a dense template and gather by sparse coords.
+            g = torch.Generator(device=device)
+            g.manual_seed(seed)
+            feats_template = torch.randn(
+                grid_size,
+                grid_size,
+                grid_size,
+                feat_dim,
+                generator=g,
+                device=device,
+            )
+            feats = feats_template[coords[:, 1], coords[:, 2], coords[:, 3]]
+
+        return sp_class(feats=feats, coords=coords)
+
+
+TRELLIS2ShapeLatentNoiseSampler = TRELLIS2SparseLatentNoiseSampler
 
 
 def trellis2_shape_latent_to_sparse_view(
@@ -335,51 +401,101 @@ class TRELLIS2ShapeLatentView:
         )
 
 
-def trellis2_dense_grid_coords(batch_size: int, grid_size: int, device: torch.device | str) -> torch.Tensor:
-    """Build full dense-grid coordinates in `[batch, x, y, z]` format.
-
-    This is used by the dense sparse-structure stage when every voxel in the
-    latent grid is present and needs a row id for sparse-view projection.
-
-    Returns:
-        Int32 tensor with shape `[batch_size * grid_size**3, 4]`.
-    """
-    grid = torch.stack(
-        torch.meshgrid(
-            torch.arange(grid_size, device=device),
-            torch.arange(grid_size, device=device),
-            torch.arange(grid_size, device=device),
-            indexing="ij",
-        ),
-        dim=-1,
-    ).reshape(-1, 3)
-    batch_ids = torch.arange(batch_size, device=device)[:, None].expand(batch_size, grid.shape[0]).reshape(-1, 1)
-    grid = grid.repeat(batch_size, 1)
-
-    return torch.cat([batch_ids, grid], dim=1).to(dtype=torch.int32)
+TRELLIS2TextureLatentNoiseSampler = TRELLIS2SparseLatentNoiseSampler
 
 
-def trellis2_sparse_structure_logits_to_coords(
-    logits: torch.Tensor,
-    target_resolution: int,
-) -> torch.Tensor:
-    """Convert sparse-structure decoder logits to shape-stage coordinates.
+def trellis2_texture_latent_to_sparse_view(
+    texture_latent,
+    mean: Optional[torch.Tensor] = None,
+    std: Optional[torch.Tensor] = None,
+):
+    """Convert TRELLIS.2 normalized texture latent feats to mapper feature space.
 
     Args:
-        logits: Occupancy logits with shape `[B, 1, G, G, G]`.
-        target_resolution: Target sparse shape-latent grid resolution.
+        texture_latent: TRELLIS.2 sparse tensor with normalized `feats`.
+        mean: Optional `[1, C]` or broadcastable per-channel mean.
+        std: Optional `[1, C]` or broadcastable per-channel standard deviation.
 
     Returns:
-        Int32 coordinates `[N, 4]` with columns `[batch, x, y, z]`.
+        De-normalized sparse feature tensor with shape `[N, C]`.
     """
-    occ = logits > 0
-    pool_size = logits.shape[-1] // target_resolution
-    occ = torch.nn.functional.max_pool3d(occ.float(), pool_size, pool_size, 0) > 0.5
+    device = texture_latent.feats.device
+    dtype = texture_latent.feats.dtype
+    if mean is None:
+        mean = torch.tensor(TRELLIS2_TEXTURE_LATENT_MEAN, device=device, dtype=dtype)[None]
+    if std is None:
+        std = torch.tensor(TRELLIS2_TEXTURE_LATENT_STD, device=device, dtype=dtype)[None]
 
-    return torch.argwhere(occ)[:, [0, 2, 3, 4]].to(dtype=torch.int32)
+    return texture_latent.feats * std + mean
+
+
+def trellis2_texture_sparse_view_to_latent(
+    sparse_view: torch.Tensor,
+    coords: torch.Tensor,
+    sp_class: Type,
+    mean: Optional[torch.Tensor] = None,
+    std: Optional[torch.Tensor] = None,
+):
+    """Convert mapper feature space back to TRELLIS.2 texture sparse latent.
+
+    Args:
+        sparse_view: De-normalized sparse features with shape `[N, C]`.
+        coords: Sparse tensor coordinates with shape `[N, 4]`.
+        sp_class: TRELLIS.2 sparse tensor class.
+        mean: Optional `[1, C]` or broadcastable per-channel mean.
+        std: Optional `[1, C]` or broadcastable per-channel standard deviation.
+
+    Returns:
+        `sp_class(feats=..., coords=coords)` with normalized feature values.
+    """
+    device = sparse_view.device
+    dtype = sparse_view.dtype
+    if mean is None:
+        mean = torch.tensor(TRELLIS2_TEXTURE_LATENT_MEAN, device=device, dtype=dtype)[None]
+    if std is None:
+        std = torch.tensor(TRELLIS2_TEXTURE_LATENT_STD, device=device, dtype=dtype)[None]
+
+    return sp_class(feats=(sparse_view - mean) / std, coords=coords)
+
+
+class TRELLIS2TextureLatentView:
+    """View adapter between TRELLIS.2 texture `SparseTensor` and mapper sparse rows."""
+
+    def __init__(
+        self,
+        coords: torch.Tensor,
+        sp_class: Type,
+    ) -> None:
+        self.coords = coords
+        self.sp_class = sp_class
+
+    def to_sparse_view(self, texture_latent) -> torch.Tensor:
+        """Convert TRELLIS.2 normalized texture latent feats to `[N, C]` rows."""
+        return trellis2_texture_latent_to_sparse_view(texture_latent)
+
+    def to_original_view(self, sparse_view: torch.Tensor):
+        """Convert `[N, C]` rows back to TRELLIS.2 normalized texture latent."""
+        return trellis2_texture_sparse_view_to_latent(
+            sparse_view=sparse_view,
+            coords=self.coords,
+            sp_class=self.sp_class,
+        )
 
 
 __all__ = [
+    "TRELLIS2FlowPredictor",
+    "TRELLIS2_SPARSE_STRUCTURE_CFG_INTERVAL",
+    "TRELLIS2_SPARSE_STRUCTURE_CFG_RESCALE",
+    "TRELLIS2_SPARSE_STRUCTURE_CFG_STRENGTH",
+    "TRELLIS2_SPARSE_STRUCTURE_RESCALE_T",
+    "TRELLIS2_SPARSE_STRUCTURE_STEPS",
+    "TRELLIS2SparseStructureLatentNoiseSampler",
+    "TRELLIS2SparseStructureView",
+    "trellis2_dense_grid_coords",
+    "trellis2_sparse_structure_latent_to_sparse_view",
+    "trellis2_sparse_structure_logits_to_coords",
+    "trellis2_sparse_view_to_sparse_structure_latent",
+    "TRELLIS2SparseLatentNoiseSampler",
     "TRELLIS2_SHAPE_LATENT_CFG_INTERVAL",
     "TRELLIS2_SHAPE_LATENT_CFG_RESCALE",
     "TRELLIS2_SHAPE_LATENT_CFG_STRENGTH",
@@ -387,20 +503,19 @@ __all__ = [
     "TRELLIS2_SHAPE_LATENT_RESCALE_T",
     "TRELLIS2_SHAPE_LATENT_STD",
     "TRELLIS2_SHAPE_LATENT_STEPS",
-    "TRELLIS2_SPARSE_STRUCTURE_CFG_INTERVAL",
-    "TRELLIS2_SPARSE_STRUCTURE_CFG_RESCALE",
-    "TRELLIS2_SPARSE_STRUCTURE_CFG_STRENGTH",
-    "TRELLIS2_SPARSE_STRUCTURE_RESCALE_T",
-    "TRELLIS2_SPARSE_STRUCTURE_STEPS",
-    "TRELLIS2FlowPredictor",
-    "TRELLIS2ShapeLatentView",
     "TRELLIS2ShapeLatentNoiseSampler",
-    "TRELLIS2SparseStructureLatentNoiseSampler",
-    "TRELLIS2SparseStructureView",
-    "trellis2_dense_grid_coords",
+    "TRELLIS2ShapeLatentView",
     "trellis2_shape_latent_to_sparse_view",
     "trellis2_shape_sparse_view_to_latent",
-    "trellis2_sparse_structure_latent_to_sparse_view",
-    "trellis2_sparse_structure_logits_to_coords",
-    "trellis2_sparse_view_to_sparse_structure_latent",
+    "TRELLIS2_TEXTURE_LATENT_CFG_INTERVAL",
+    "TRELLIS2_TEXTURE_LATENT_CFG_RESCALE",
+    "TRELLIS2_TEXTURE_LATENT_CFG_STRENGTH",
+    "TRELLIS2_TEXTURE_LATENT_MEAN",
+    "TRELLIS2_TEXTURE_LATENT_RESCALE_T",
+    "TRELLIS2_TEXTURE_LATENT_STD",
+    "TRELLIS2_TEXTURE_LATENT_STEPS",
+    "TRELLIS2TextureLatentNoiseSampler",
+    "TRELLIS2TextureLatentView",
+    "trellis2_texture_latent_to_sparse_view",
+    "trellis2_texture_sparse_view_to_latent",
 ]

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import type { SymmetryOverlay, SymmetryTuple, ThemeMode } from '../types';
+import type { SymmetryOverlay, SymmetryTuple, ThemeMode, ViewerContent } from '../types';
 import {
   DEFAULT_CAMERA_DIRECTION,
   VIEW_GIZMO_RIGHT,
@@ -31,6 +31,7 @@ type ThreeViewerProps = {
   selectedOverlayId: string | null;
   symmetryPreview: SymmetryTuple | null;
   theme: ThemeMode;
+  viewerContent: ViewerContent;
 };
 
 type CameraAnimation = {
@@ -44,6 +45,7 @@ type CameraAnimation = {
 
 type ViewerRuntime = {
   applyTheme: (theme: ThemeMode) => void;
+  setViewerContent: (content: ViewerContent) => void;
   setSymmetryPreview: (symmetry: SymmetryTuple | null) => void;
   setOverlays: (
     overlays: SymmetryOverlay[],
@@ -59,6 +61,7 @@ export function ThreeViewer({
   selectedOverlayId,
   symmetryPreview,
   theme,
+  viewerContent,
 }: ThreeViewerProps) {
   const hostRef = useRef<HTMLElement>(null);
   const onOverlayPickRef = useRef(onOverlayPick);
@@ -171,17 +174,61 @@ export function ThreeViewer({
     const loader = new GLTFLoader();
     let model: THREE.Object3D | null = null;
     let mounted = true;
-    loader.load('/mock/test.glb', (gltf) => {
-      if (!mounted) {
+    let viewerContentVersion = 0;
+    let activeViewerContent: ViewerContent = { kind: 'empty' };
+
+    const clearModel = () => {
+      if (!model) {
         return;
       }
 
-      model = gltf.scene;
-      orientMockGlbToZUp(model);
-      normalizeObjectToCanonicalBox(model);
-      applyViewerMaterial(model, colors.mesh);
-      scene.add(model);
-    });
+      scene.remove(model);
+      disposeObject(model);
+      model = null;
+    };
+
+    const setViewerContent = (nextContent: ViewerContent) => {
+      if (
+        nextContent.kind === activeViewerContent.kind &&
+        (nextContent.kind === 'empty' ||
+          (activeViewerContent.kind === 'glb' &&
+            nextContent.kind === 'glb' &&
+            nextContent.url === activeViewerContent.url &&
+            nextContent.material === activeViewerContent.material &&
+            nextContent.orientation === activeViewerContent.orientation))
+      ) {
+        return;
+      }
+
+      activeViewerContent = nextContent;
+      viewerContentVersion += 1;
+      clearModel();
+
+      if (nextContent.kind === 'empty') {
+        return;
+      }
+
+      const loadVersion = viewerContentVersion;
+
+      loader.load(nextContent.url, (gltf) => {
+        if (!mounted || loadVersion !== viewerContentVersion) {
+          disposeObject(gltf.scene);
+          return;
+        }
+
+        model = gltf.scene;
+        if (nextContent.orientation === 'mock_test_glb') {
+          orientMockGlbToZUp(model);
+        }
+
+        normalizeObjectToCanonicalBox(model);
+        if (nextContent.material === 'neutral') {
+          applyViewerMaterial(model, colors.mesh);
+        }
+
+        scene.add(model);
+      });
+    };
 
     const applyTheme = (nextTheme: ThemeMode) => {
       if (nextTheme === activeTheme) {
@@ -210,7 +257,11 @@ export function ThreeViewer({
       viewGizmo = createViewGizmo(colors);
       gizmoMeshes = viewGizmo.pickables.map((pickable) => pickable.object);
 
-      if (model) {
+      if (
+        model &&
+        activeViewerContent.kind === 'glb' &&
+        activeViewerContent.material === 'neutral'
+      ) {
         applyViewerMaterial(model, colors.mesh);
       }
 
@@ -241,7 +292,8 @@ export function ThreeViewer({
       scene.add(symmetryPreviewGroup);
     };
 
-    runtimeRef.current = { applyTheme, setSymmetryPreview, setOverlays };
+    runtimeRef.current = { applyTheme, setViewerContent, setSymmetryPreview, setOverlays };
+    setViewerContent(viewerContent);
 
     const updateViewport = () => {
       const width = host.clientWidth;
@@ -257,12 +309,16 @@ export function ThreeViewer({
         rescaleCameraDistance(compact ? mobileCameraScale : 1 / mobileCameraScale);
       }
 
+      const panel = document.querySelector<HTMLElement>('.node-panel-anchor');
+      const panelRect = panel?.getBoundingClientRect();
       if (compact) {
-        const panel = document.querySelector<HTMLElement>('.node-panel-anchor');
-        const bottomInset = panel
-          ? Math.ceil(height - panel.getBoundingClientRect().top + 12)
+        const bottomInset = panelRect
+          ? Math.ceil(height - panelRect.top + 12)
           : Math.round(height * 0.45);
         camera.setViewOffset(width, height + bottomInset, 0, bottomInset, width, height);
+      } else if (panelRect && panelRect.right > 0) {
+        const leftInset = Math.ceil(panelRect.right + 12);
+        camera.setViewOffset(width + leftInset, height, 0, 0, width, height);
       } else {
         camera.clearViewOffset();
       }
@@ -479,6 +535,10 @@ export function ThreeViewer({
   useEffect(() => {
     runtimeRef.current?.setSymmetryPreview(symmetryPreview);
   }, [symmetryPreview]);
+
+  useEffect(() => {
+    runtimeRef.current?.setViewerContent(viewerContent);
+  }, [viewerContent]);
 
   return (
     <main className="three-viewer" aria-label="3D viewer" data-viewer-theme={theme} ref={hostRef}>

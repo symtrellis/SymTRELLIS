@@ -2,8 +2,8 @@ import type { DagEdge, DagNode } from './types';
 
 export const dagNodes: DagNode[] = [
   { id: 'img_cond', label: 'IMG COND', shortLabel: 'IMG COND' },
-  { id: 'nat_ss', label: 'NAT SS', shortLabel: 'NAT SS' },
-  { id: 'nat_shape', label: 'NAT SHAPE', shortLabel: 'NAT SHAPE' },
+  { id: 'nat_ss', label: 'VANILLA SS', shortLabel: 'VANILLA SS' },
+  { id: 'nat_shape', label: 'VANILLA SHAPE', shortLabel: 'VANILLA SHAPE' },
   { id: 'detect_sym', label: 'DETECT SYM', shortLabel: 'DETECT SYM' },
   { id: 'manual_sym', label: 'MANUAL SYM', shortLabel: 'MANUAL SYM' },
   { id: 'sym_ss', label: 'SYM SS', shortLabel: 'SYM SS' },

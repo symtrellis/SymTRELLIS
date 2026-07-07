@@ -849,12 +849,14 @@ export function normalizeObjectToCanonicalBox(object: THREE.Object3D, targetSize
   object.scale.multiplyScalar(scale);
 }
 
+// MOCK_TEST_GLB_START
 export function orientMockGlbToZUp(object: THREE.Object3D) {
-  // Temporary fixture-only correction for public/mock/test.glb. The real backend output must
-  // already use SymTRELLIS canonical Z-up coordinates; delete this when the mock asset is removed.
+  // Fixture-only correction for public/mock/test.glb.
+  // Real backend mesh previews and generated mock artifacts must already use canonical Z-up coordinates.
   object.rotation.x = Math.PI / 2;
   object.updateMatrixWorld(true);
 }
+// MOCK_TEST_GLB_END
 
 export function applyViewerMaterial(object: THREE.Object3D, color: string) {
   const fallbackMaterial = new THREE.MeshStandardMaterial({

@@ -49,10 +49,12 @@ const candidateColors = [
 ];
 
 export async function detectRotationAxes(): Promise<RotationAxisCandidate[]> {
+  // MOCK_DETECTION_API_START
+  // Reads fixture JSON from public/mock until FastAPI detection endpoints exist.
+  // Replace this block with backend detection API calls.
   const response = await fetch('/mock/detect_rotation_axes.json');
   const candidates = (await response.json()) as RawRotationAxisCandidate[];
-
-  return candidates.map((candidate, index) => ({
+  const result = candidates.map((candidate, index) => ({
     axis: candidate.axis,
     center: candidate.q,
     color: candidateColors[index % candidateColors.length],
@@ -63,9 +65,15 @@ export async function detectRotationAxes(): Promise<RotationAxisCandidate[]> {
     ratio: candidate.ratio,
     rmse: candidate.rmse,
   }));
+  // MOCK_DETECTION_API_END
+
+  return result;
 }
 
 export async function detectFinerSymmetry(): Promise<FinerSymmetryResult> {
+  // MOCK_DETECTION_API_START
+  // Reads fixture JSON from public/mock until FastAPI detection endpoints exist.
+  // Replace this block with backend detection API calls.
   const [c2Response, containingResponse, perpendicularResponse] = await Promise.all([
     fetch('/mock/detect_c2_axes_perpendicular_to_axis.json'),
     fetch('/mock/detect_reflection_planes_containing_axis.json'),
@@ -74,8 +82,7 @@ export async function detectFinerSymmetry(): Promise<FinerSymmetryResult> {
   const c2Axes = (await c2Response.json()) as RawC2AxisCandidate[];
   const containingPlanes = (await containingResponse.json()) as RawReflectionPlaneCandidate[];
   const perpendicularPlanes = (await perpendicularResponse.json()) as RawReflectionPlaneCandidate[];
-
-  return {
+  const result: FinerSymmetryResult = {
     c2Axes: c2Axes.map((candidate, index) => ({
       axis: candidate.axis,
       axisCorrected: candidate.axis_cor,
@@ -114,4 +121,7 @@ export async function detectFinerSymmetry(): Promise<FinerSymmetryResult> {
       role: 'perpendicular_to_major_axis',
     })),
   };
+  // MOCK_DETECTION_API_END
+
+  return result;
 }
