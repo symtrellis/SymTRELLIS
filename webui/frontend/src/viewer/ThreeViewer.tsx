@@ -1,72 +1,77 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import type { SymmetryOverlay, SymmetryTuple, ThemeMode, ViewerContent } from '../types';
+import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import type { ThemeMode } from '../types';
+import type { ViewerContent } from './viewerTypes';
+import { createGlbContentManager } from './glbContent';
+import { createSymmetryOverlayGroup } from './symmetryOverlays';
+import { createSymmetryPreviewGroup } from './symmetryPreview';
+import {
+  createCanonicalBox,
+  createViewerLights,
+  createWorldAxes,
+  disposeObject,
+  updateWorldAxesColors,
+} from './scenePrimitives';
 import {
   DEFAULT_CAMERA_DIRECTION,
   VIEW_GIZMO_RIGHT,
   VIEW_GIZMO_SIZE,
   VIEW_GIZMO_TOP,
-  applyViewerMaterial,
-  createCanonicalBox,
-  createSymmetryPreviewGroup,
-  createSymmetryOverlayGroup,
   createViewGizmo,
-  createWorldAxes,
-  normalizeObjectToCanonicalBox,
-  orientMockGlbToZUp,
-  updateWorldAxesColors,
   viewDirectionForTarget,
-  viewUpForTarget,
-  viewerColors,
-} from './viewerUtils';
-import type { ViewGizmoTarget } from './viewerUtils';
+} from './viewGizmo';
+import type { ViewGizmoTarget } from './viewGizmo';
+import { viewerColors } from './viewerTheme';
 
 type ThreeViewerProps = {
-  onOverlayPick: (overlayId: string) => void;
-  overlays: SymmetryOverlay[];
-  selectableOverlayIds: string[];
-  selectedOverlayId: string | null;
-  symmetryPreview: SymmetryTuple | null;
+  content: ViewerContent;
+  dagVisible: boolean;
+  onOverlayPicked?: (overlayId: string) => void;
   theme: ThemeMode;
-  viewerContent: ViewerContent;
 };
 
 type CameraAnimation = {
   duration: number;
+  lockTopView: boolean;
   startPosition: THREE.Vector3;
+  startQuaternion: THREE.Quaternion;
   startTime: number;
-  startUp: THREE.Vector3;
   targetPosition: THREE.Vector3;
-  targetUp: THREE.Vector3;
+  targetQuaternion: THREE.Quaternion;
 };
+
+type LockedTopDrag = {
+  distance: number;
+  moved: boolean;
+  right: THREE.Vector3;
+  startX: number;
+  startY: number;
+  up: THREE.Vector3;
+  zAxis: THREE.Vector3;
+};
+
+type ViewInsets = { bottom: number; left: number; right: number };
+
+type ViewInsetAnimation = { start: ViewInsets; startTime: number; target: ViewInsets };
 
 type ViewerRuntime = {
+  applyContent: (content: ViewerContent) => void;
   applyTheme: (theme: ThemeMode) => void;
-  setViewerContent: (content: ViewerContent) => void;
-  setSymmetryPreview: (symmetry: SymmetryTuple | null) => void;
-  setOverlays: (
-    overlays: SymmetryOverlay[],
-    selectedOverlayId: string | null,
-    selectableOverlayIds: string[],
-  ) => void;
+  refreshLayout: (animate: boolean) => void;
 };
 
-export function ThreeViewer({
-  onOverlayPick,
-  overlays,
-  selectableOverlayIds,
-  selectedOverlayId,
-  symmetryPreview,
-  theme,
-  viewerContent,
-}: ThreeViewerProps) {
+export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: ThreeViewerProps) {
   const hostRef = useRef<HTMLElement>(null);
-  const onOverlayPickRef = useRef(onOverlayPick);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
-  onOverlayPickRef.current = onOverlayPick;
+  const initialContentRef = useRef(content);
+  const initialThemeRef = useRef(theme);
+  const onOverlayPickedRef = useRef(onOverlayPicked);
+
+  useEffect(() => {
+    onOverlayPickedRef.current = onOverlayPicked;
+  }, [onOverlayPicked]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -75,13 +80,15 @@ export function ThreeViewer({
       return;
     }
 
-    let activeTheme = theme;
+    let activeTheme = initialThemeRef.current;
     let colors = viewerColors(activeTheme);
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(colors.background);
 
     const camera = new THREE.PerspectiveCamera(38, host.clientWidth / host.clientHeight, 0.01, 100);
-    camera.up.set(0, 0, 1);
+    const worldUp = new THREE.Vector3(0, 0, 1);
+    camera.up.copy(worldUp);
+
     const mobileCameraScale = 1.8;
     const isCompactViewport = () => window.matchMedia('(max-width: 760px)').matches;
     const defaultCameraDistance = (compact: boolean) =>
@@ -113,121 +120,49 @@ export function ThreeViewer({
     controls.dampingFactor = 0.08;
     controls.target.set(0, 0, 0);
     controls.update();
+
     const rescaleCameraDistance = (scale: number) => {
       const offset = camera.position.clone().sub(controls.target).multiplyScalar(scale);
       camera.position.copy(controls.target).add(offset);
     };
 
-    const hemisphereLight = new THREE.HemisphereLight(
-      0xffffff,
-      activeTheme === 'dark' ? 0x343438 : 0xd6d0c6,
-      activeTheme === 'dark' ? 0.72 : 0.62,
-    );
-    scene.add(hemisphereLight);
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, activeTheme === 'dark' ? 0.25 : 0.3);
-    scene.add(ambientLight);
-
-    const keyLight = new THREE.DirectionalLight(0xffffff, activeTheme === 'dark' ? 3.5 : 3);
-    keyLight.position.set(2.5, -3.5, 4.5);
-    keyLight.castShadow = true;
-    scene.add(keyLight);
-
-    const fillLight = new THREE.DirectionalLight(0xdde6ff, activeTheme === 'dark' ? 0.85 : 0.58);
-    fillLight.position.set(-3, 2.5, 2);
-    scene.add(fillLight);
-
-    const rimLight = new THREE.DirectionalLight(0xffffff, activeTheme === 'dark' ? 1.4 : 1.05);
-    rimLight.position.set(-2, 3.8, 3.2);
-    scene.add(rimLight);
-
+    let lights = createViewerLights(activeTheme);
     let canonicalBox = createCanonicalBox(colors.box);
     const worldAxes = createWorldAxes(colors);
-    scene.add(canonicalBox, worldAxes);
-
-    let symmetryOverlay = createSymmetryOverlayGroup([], null, []);
-    let symmetryPickables = symmetryOverlay.pickables;
-    scene.add(symmetryOverlay.group);
-
-    let activeSymmetryPreview: SymmetryTuple | null = null;
-    let symmetryPreviewGroup = createSymmetryPreviewGroup(null, colors);
-    scene.add(symmetryPreviewGroup);
+    scene.add(lights, canonicalBox, worldAxes);
+    let activeContent = initialContentRef.current;
+    const glbContent = createGlbContentManager(scene);
+    glbContent.setContent(activeContent.glb, colors);
+    let overlayRender = createSymmetryOverlayGroup(
+      activeContent.overlays,
+      activeContent.selectedOverlayId,
+      activeContent.selectableOverlayIds,
+    );
+    let overlayPickables = overlayRender.pickables;
+    let symmetryPreview = createSymmetryPreviewGroup(activeContent.symmetryPreview, colors);
+    scene.add(overlayRender.group, symmetryPreview);
 
     let viewGizmo = createViewGizmo(colors);
     let gizmoMeshes = viewGizmo.pickables.map((pickable) => pickable.object);
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     let cameraAnimation: CameraAnimation | null = null;
-    let pendingOverlayPick: { dragged: boolean; id: string; x: number; y: number } | null = null;
+    let lockedTopDrag: LockedTopDrag | null = null;
+    let lockedTopView = false;
+    let viewInsetAnimation: ViewInsetAnimation | null = null;
+    let viewInsets: ViewInsets = { bottom: 0, left: 0, right: 0 };
     let usingDefaultView = true;
     const markCustomView = () => {
       usingDefaultView = false;
     };
     controls.addEventListener('start', markCustomView);
+    let overlayPointerDown: { x: number; y: number } | null = null;
+
     let gizmoRect = {
       height: VIEW_GIZMO_SIZE,
       left: host.clientWidth - VIEW_GIZMO_RIGHT - VIEW_GIZMO_SIZE,
       top: VIEW_GIZMO_TOP,
       width: VIEW_GIZMO_SIZE,
-    };
-
-    const loader = new GLTFLoader();
-    let model: THREE.Object3D | null = null;
-    let mounted = true;
-    let viewerContentVersion = 0;
-    let activeViewerContent: ViewerContent = { kind: 'empty' };
-
-    const clearModel = () => {
-      if (!model) {
-        return;
-      }
-
-      scene.remove(model);
-      disposeObject(model);
-      model = null;
-    };
-
-    const setViewerContent = (nextContent: ViewerContent) => {
-      if (
-        nextContent.kind === activeViewerContent.kind &&
-        (nextContent.kind === 'empty' ||
-          (activeViewerContent.kind === 'glb' &&
-            nextContent.kind === 'glb' &&
-            nextContent.url === activeViewerContent.url &&
-            nextContent.material === activeViewerContent.material &&
-            nextContent.orientation === activeViewerContent.orientation))
-      ) {
-        return;
-      }
-
-      activeViewerContent = nextContent;
-      viewerContentVersion += 1;
-      clearModel();
-
-      if (nextContent.kind === 'empty') {
-        return;
-      }
-
-      const loadVersion = viewerContentVersion;
-
-      loader.load(nextContent.url, (gltf) => {
-        if (!mounted || loadVersion !== viewerContentVersion) {
-          disposeObject(gltf.scene);
-          return;
-        }
-
-        model = gltf.scene;
-        if (nextContent.orientation === 'mock_test_glb') {
-          orientMockGlbToZUp(model);
-        }
-
-        normalizeObjectToCanonicalBox(model);
-        if (nextContent.material === 'neutral') {
-          applyViewerMaterial(model, colors.mesh);
-        }
-
-        scene.add(model);
-      });
     };
 
     const applyTheme = (nextTheme: ThemeMode) => {
@@ -237,65 +172,74 @@ export function ThreeViewer({
 
       activeTheme = nextTheme;
       colors = viewerColors(activeTheme);
-
       scene.background = new THREE.Color(colors.background);
       renderer.toneMappingExposure = activeTheme === 'dark' ? 1.08 : 1;
-      hemisphereLight.groundColor.set(activeTheme === 'dark' ? 0x343438 : 0xd6d0c6);
-      hemisphereLight.intensity = activeTheme === 'dark' ? 0.72 : 0.62;
-      ambientLight.intensity = activeTheme === 'dark' ? 0.25 : 0.3;
-      keyLight.intensity = activeTheme === 'dark' ? 3.5 : 3;
-      fillLight.intensity = activeTheme === 'dark' ? 0.85 : 0.58;
-      rimLight.intensity = activeTheme === 'dark' ? 1.4 : 1.05;
 
-      scene.remove(canonicalBox);
+      scene.remove(lights, canonicalBox);
       disposeObject(canonicalBox);
+      lights = createViewerLights(activeTheme);
       canonicalBox = createCanonicalBox(colors.box);
+      scene.add(lights, canonicalBox);
+
       updateWorldAxesColors(worldAxes, colors);
-      scene.add(canonicalBox);
 
       disposeObject(viewGizmo.scene);
       viewGizmo = createViewGizmo(colors);
       gizmoMeshes = viewGizmo.pickables.map((pickable) => pickable.object);
+      glbContent.applyTheme(colors);
 
-      if (
-        model &&
-        activeViewerContent.kind === 'glb' &&
-        activeViewerContent.material === 'neutral'
-      ) {
-        applyViewerMaterial(model, colors.mesh);
+      scene.remove(overlayRender.group, symmetryPreview);
+      disposeObject(overlayRender.group);
+      disposeObject(symmetryPreview);
+      overlayRender = createSymmetryOverlayGroup(
+        activeContent.overlays,
+        activeContent.selectedOverlayId,
+        activeContent.selectableOverlayIds,
+      );
+      overlayPickables = overlayRender.pickables;
+      symmetryPreview = createSymmetryPreviewGroup(activeContent.symmetryPreview, colors);
+      scene.add(overlayRender.group, symmetryPreview);
+    };
+
+    const applyContent = (nextContent: ViewerContent) => {
+      activeContent = nextContent;
+      glbContent.setContent(activeContent.glb, colors);
+      scene.remove(overlayRender.group, symmetryPreview);
+      disposeObject(overlayRender.group);
+      disposeObject(symmetryPreview);
+      overlayRender = createSymmetryOverlayGroup(
+        activeContent.overlays,
+        activeContent.selectedOverlayId,
+        activeContent.selectableOverlayIds,
+      );
+      overlayPickables = overlayRender.pickables;
+      symmetryPreview = createSymmetryPreviewGroup(activeContent.symmetryPreview, colors);
+      scene.add(overlayRender.group, symmetryPreview);
+    };
+
+    const applyViewInsets = (insets: ViewInsets) => {
+      const width = host.clientWidth;
+      const height = host.clientHeight;
+
+      if (compactViewport) {
+        camera.setViewOffset(width, height + insets.bottom, 0, insets.bottom, width, height);
+      } else if (insets.left > 0 || insets.right > 0) {
+        camera.setViewOffset(
+          width + insets.left + insets.right,
+          height,
+          insets.right,
+          0,
+          width,
+          height,
+        );
+      } else {
+        camera.clearViewOffset();
       }
 
-      setSymmetryPreview(activeSymmetryPreview);
+      camera.updateProjectionMatrix();
     };
 
-    const setOverlays = (
-      nextOverlays: SymmetryOverlay[],
-      nextSelectedOverlayId: string | null,
-      nextSelectableOverlayIds: string[],
-    ) => {
-      scene.remove(symmetryOverlay.group);
-      disposeObject(symmetryOverlay.group);
-      symmetryOverlay = createSymmetryOverlayGroup(
-        nextOverlays,
-        nextSelectedOverlayId,
-        nextSelectableOverlayIds,
-      );
-      symmetryPickables = symmetryOverlay.pickables;
-      scene.add(symmetryOverlay.group);
-    };
-
-    const setSymmetryPreview = (nextSymmetry: SymmetryTuple | null) => {
-      activeSymmetryPreview = nextSymmetry;
-      scene.remove(symmetryPreviewGroup);
-      disposeObject(symmetryPreviewGroup);
-      symmetryPreviewGroup = createSymmetryPreviewGroup(activeSymmetryPreview, colors);
-      scene.add(symmetryPreviewGroup);
-    };
-
-    runtimeRef.current = { applyTheme, setViewerContent, setSymmetryPreview, setOverlays };
-    setViewerContent(viewerContent);
-
-    const updateViewport = () => {
+    const updateViewport = (animateInsets = false) => {
       const width = host.clientWidth;
       const height = host.clientHeight;
       const compact = isCompactViewport();
@@ -311,16 +255,36 @@ export function ThreeViewer({
 
       const panel = document.querySelector<HTMLElement>('.node-panel-anchor');
       const panelRect = panel?.getBoundingClientRect();
-      if (compact) {
-        const bottomInset = panelRect
-          ? Math.ceil(height - panelRect.top + 12)
-          : Math.round(height * 0.45);
-        camera.setViewOffset(width, height + bottomInset, 0, bottomInset, width, height);
-      } else if (panelRect && panelRect.right > 0) {
-        const leftInset = Math.ceil(panelRect.right + 12);
-        camera.setViewOffset(width + leftInset, height, 0, 0, width, height);
+      const dag = document.querySelector<HTMLElement>('.dag-anchor');
+      const dagRect = dag?.getBoundingClientRect();
+      const nextInsets: ViewInsets = compact
+        ? {
+            bottom: panelRect
+              ? Math.ceil(height - panelRect.top + 12)
+              : Math.round(height * 0.45),
+            left: 0,
+            right: 0,
+          }
+        : {
+            bottom: 0,
+            left: panelRect && panelRect.right > 0 ? Math.ceil(panelRect.right + 12) : 0,
+            right: dagRect ? Math.ceil(width - dagRect.left + 12) : 0,
+          };
+
+      const insetsChanged =
+        nextInsets.bottom !== viewInsets.bottom ||
+        nextInsets.left !== viewInsets.left ||
+        nextInsets.right !== viewInsets.right;
+      if (animateInsets && insetsChanged) {
+        viewInsetAnimation = {
+          start: { ...viewInsets },
+          startTime: performance.now(),
+          target: nextInsets,
+        };
       } else {
-        camera.clearViewOffset();
+        viewInsetAnimation = null;
+        viewInsets = nextInsets;
+        applyViewInsets(viewInsets);
       }
 
       gizmoRect = {
@@ -331,27 +295,74 @@ export function ThreeViewer({
       };
 
       controls.update();
-      camera.updateProjectionMatrix();
       renderer.setSize(width, height);
       labelRenderer.setSize(width, height);
       previousCompact = compact;
     };
 
+    const updateViewInsetAnimation = (time: number) => {
+      if (!viewInsetAnimation) {
+        return;
+      }
+
+      const progress = Math.min((time - viewInsetAnimation.startTime) / 150, 1);
+      const eased = progress * progress * (3 - 2 * progress);
+      viewInsets = {
+        bottom:
+          viewInsetAnimation.start.bottom +
+          (viewInsetAnimation.target.bottom - viewInsetAnimation.start.bottom) * eased,
+        left:
+          viewInsetAnimation.start.left +
+          (viewInsetAnimation.target.left - viewInsetAnimation.start.left) * eased,
+        right:
+          viewInsetAnimation.start.right +
+          (viewInsetAnimation.target.right - viewInsetAnimation.start.right) * eased,
+      };
+      applyViewInsets(viewInsets);
+
+      if (progress === 1) {
+        viewInsets = viewInsetAnimation.target;
+        viewInsetAnimation = null;
+        applyViewInsets(viewInsets);
+      }
+    };
+
+    runtimeRef.current = {
+      applyContent,
+      applyTheme,
+      refreshLayout: (animate) => updateViewport(animate),
+    };
+    const handleResize = () => updateViewport(false);
+
     const startCameraMove = (target: ViewGizmoTarget) => {
       usingDefaultView = target === 'default';
+      lockedTopDrag = null;
+      lockedTopView = false;
       const direction = viewDirectionForTarget(target);
       const distance = usingDefaultView
         ? defaultCameraDistance(compactViewport)
         : camera.position.distanceTo(controls.target);
       const targetPosition = controls.target.clone().add(direction.clone().multiplyScalar(distance));
+      const right = new THREE.Vector3();
+      if (target === 'z+' || target === 'z-') {
+        right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+        right.addScaledVector(direction, -right.dot(direction)).normalize();
+      } else {
+        right.crossVectors(worldUp, direction).normalize();
+      }
+      const up = new THREE.Vector3().crossVectors(direction, right).normalize();
+      const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+        new THREE.Matrix4().makeBasis(right, up, direction),
+      );
 
       cameraAnimation = {
         duration: 300,
+        lockTopView: target === 'z+' || target === 'z-',
         startPosition: camera.position.clone(),
+        startQuaternion: camera.quaternion.clone(),
         startTime: performance.now(),
-        startUp: camera.up.clone(),
         targetPosition,
-        targetUp: viewUpForTarget(target, direction, camera.quaternion),
+        targetQuaternion,
       };
       controls.enabled = false;
     };
@@ -381,51 +392,94 @@ export function ThreeViewer({
         if (pickable) {
           startCameraMove(pickable.target);
         }
+
         return;
       }
 
-      pointer.set((x / canvasRect.width) * 2 - 1, -(y / canvasRect.height) * 2 + 1);
-      raycaster.setFromCamera(pointer, camera);
+      if (lockedTopView) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
 
-      const overlayHit = raycaster.intersectObjects(symmetryPickables, false)[0];
-      const overlayId = overlayHit?.object.userData.overlayId as string | undefined;
-      pendingOverlayPick = overlayId ? { dragged: false, id: overlayId, x: event.clientX, y: event.clientY } : null;
+        lockedTopDrag = {
+          distance: camera.position.distanceTo(controls.target),
+          moved: false,
+          right: new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize(),
+          startX: event.clientX,
+          startY: event.clientY,
+          up: new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize(),
+          zAxis: camera.position.clone().sub(controls.target).normalize(),
+        };
+        overlayPointerDown = null;
+        return;
+      }
+
+      overlayPointerDown = { x: event.clientX, y: event.clientY };
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (!pendingOverlayPick) {
+      if (!lockedTopDrag) {
         return;
       }
 
-      const dx = event.clientX - pendingOverlayPick.x;
-      const dy = event.clientY - pendingOverlayPick.y;
-      if (Math.hypot(dx, dy) > 5) {
-        pendingOverlayPick.dragged = true;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const dx = event.clientX - lockedTopDrag.startX;
+      const dy = event.clientY - lockedTopDrag.startY;
+      if (Math.hypot(dx, dy) <= 1) {
+        return;
       }
+
+      lockedTopDrag.moved = true;
+      const dragScale = 0.006;
+      const direction = lockedTopDrag.zAxis
+        .clone()
+        .addScaledVector(lockedTopDrag.right, -dx * dragScale)
+        .addScaledVector(lockedTopDrag.up, dy * dragScale)
+        .normalize();
+      camera.position.copy(controls.target).add(direction.multiplyScalar(lockedTopDrag.distance));
+      camera.up.copy(worldUp);
+      camera.lookAt(controls.target);
     };
 
     const handlePointerUp = (event: PointerEvent) => {
-      if (!pendingOverlayPick) {
+      if (lockedTopDrag) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        const moved = lockedTopDrag.moved;
+        lockedTopDrag = null;
+        if (moved) {
+          lockedTopView = false;
+          controls.enabled = true;
+          controls.update();
+        }
         return;
       }
 
-      const pick = pendingOverlayPick;
-      pendingOverlayPick = null;
+      if (!overlayPointerDown || overlayPickables.length === 0) {
+        overlayPointerDown = null;
+        return;
+      }
 
-      if (pick.dragged) {
+      const moved = Math.hypot(event.clientX - overlayPointerDown.x, event.clientY - overlayPointerDown.y);
+      overlayPointerDown = null;
+
+      if (moved > 4) {
         return;
       }
 
       const canvasRect = renderer.domElement.getBoundingClientRect();
-      const x = event.clientX - canvasRect.left;
-      const y = event.clientY - canvasRect.top;
-      pointer.set((x / canvasRect.width) * 2 - 1, -(y / canvasRect.height) * 2 + 1);
+      pointer.set(
+        ((event.clientX - canvasRect.left) / canvasRect.width) * 2 - 1,
+        -(((event.clientY - canvasRect.top) / canvasRect.height) * 2 - 1),
+      );
       raycaster.setFromCamera(pointer, camera);
 
-      const overlayHit = raycaster.intersectObjects(symmetryPickables, false)[0];
-      const overlayId = overlayHit?.object.userData.overlayId as string | undefined;
-      if (overlayId === pick.id) {
-        onOverlayPickRef.current(pick.id);
+      const hit = raycaster.intersectObjects(overlayPickables, false)[0];
+      const overlayId = hit?.object.userData.overlayId as string | undefined;
+      if (overlayId) {
+        onOverlayPickedRef.current?.(overlayId);
       }
     };
 
@@ -438,13 +492,21 @@ export function ThreeViewer({
       const eased = progress * progress * (3 - 2 * progress);
 
       camera.position.copy(cameraAnimation.startPosition).lerp(cameraAnimation.targetPosition, eased);
-      camera.up.copy(cameraAnimation.startUp).lerp(cameraAnimation.targetUp, eased).normalize();
-      camera.lookAt(controls.target);
+      camera.quaternion.slerpQuaternions(
+        cameraAnimation.startQuaternion,
+        cameraAnimation.targetQuaternion,
+        eased,
+      );
+      camera.up.copy(worldUp);
 
       if (progress === 1) {
+        const lockTopView = cameraAnimation.lockTopView;
         cameraAnimation = null;
-        controls.enabled = true;
-        controls.update();
+        lockedTopView = lockTopView;
+        controls.enabled = !lockTopView;
+        if (!lockTopView) {
+          controls.update();
+        }
       }
 
       return true;
@@ -460,8 +522,7 @@ export function ThreeViewer({
       const direction = camera.position.clone().sub(controls.target).normalize();
 
       viewGizmo.camera.position.copy(direction.multiplyScalar(3));
-      viewGizmo.camera.up.copy(camera.up);
-      viewGizmo.camera.lookAt(0, 0, 0);
+      viewGizmo.camera.quaternion.copy(camera.quaternion);
 
       const autoClear = renderer.autoClear;
       renderer.autoClear = false;
@@ -486,16 +547,19 @@ export function ThreeViewer({
     };
 
     updateViewport();
-    window.addEventListener('resize', updateViewport);
+    window.addEventListener('resize', handleResize);
     renderer.domElement.addEventListener('pointerdown', handlePointerDown, true);
     renderer.domElement.addEventListener('pointermove', handlePointerMove, true);
-    renderer.domElement.addEventListener('pointerup', handlePointerUp, true);
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
 
     let frameId = 0;
     const render = (time: number) => {
       frameId = window.requestAnimationFrame(render);
+      updateViewInsetAnimation(time);
       if (!updateCameraAnimation(time)) {
-        controls.update();
+        if (!lockedTopView && !lockedTopDrag) {
+          controls.update();
+        }
       }
 
       renderer.setScissorTest(false);
@@ -507,15 +571,15 @@ export function ThreeViewer({
     frameId = window.requestAnimationFrame(render);
 
     return () => {
-      mounted = false;
       runtimeRef.current = null;
       window.cancelAnimationFrame(frameId);
-      window.removeEventListener('resize', updateViewport);
+      window.removeEventListener('resize', handleResize);
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown, true);
       renderer.domElement.removeEventListener('pointermove', handlePointerMove, true);
-      renderer.domElement.removeEventListener('pointerup', handlePointerUp, true);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
       controls.removeEventListener('start', markCustomView);
       controls.dispose();
+      glbContent.dispose();
       disposeObject(scene);
       disposeObject(viewGizmo.scene);
       renderer.dispose();
@@ -529,16 +593,12 @@ export function ThreeViewer({
   }, [theme]);
 
   useEffect(() => {
-    runtimeRef.current?.setOverlays(overlays, selectedOverlayId, selectableOverlayIds);
-  }, [overlays, selectableOverlayIds, selectedOverlayId]);
+    runtimeRef.current?.applyContent(content);
+  }, [content]);
 
   useEffect(() => {
-    runtimeRef.current?.setSymmetryPreview(symmetryPreview);
-  }, [symmetryPreview]);
-
-  useEffect(() => {
-    runtimeRef.current?.setViewerContent(viewerContent);
-  }, [viewerContent]);
+    runtimeRef.current?.refreshLayout(true);
+  }, [dagVisible]);
 
   return (
     <main className="three-viewer" aria-label="3D viewer" data-viewer-theme={theme} ref={hostRef}>
@@ -548,36 +608,4 @@ export function ThreeViewer({
       </div>
     </main>
   );
-}
-
-type DisposableObject = THREE.Object3D & {
-  geometry?: THREE.BufferGeometry;
-  material?: THREE.Material | THREE.Material[];
-};
-
-type TexturedMaterial = THREE.Material & {
-  map?: THREE.Texture | null;
-};
-
-function disposeObject(object: THREE.Object3D) {
-  object.traverse((child) => {
-    if (child instanceof CSS2DObject) {
-      child.element.remove();
-    }
-
-    const disposable = child as DisposableObject;
-    disposable.geometry?.dispose();
-
-    if (Array.isArray(disposable.material)) {
-      disposable.material.forEach(disposeMaterial);
-    } else {
-      disposable.material && disposeMaterial(disposable.material);
-    }
-  });
-}
-
-function disposeMaterial(material: THREE.Material) {
-  const texture = (material as TexturedMaterial).map;
-  texture?.dispose();
-  material.dispose();
 }

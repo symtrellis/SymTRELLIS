@@ -1,22 +1,26 @@
 import type { Dispatch } from 'react';
-import { canProposeSymmetry } from '../state';
-import type { DetectionAction, DetectionState } from '../state';
-
-function formatVector(vector: DetectionState['majorAxis']) {
-  return `[${vector.map((value) => Number(value.toFixed(4)).toString()).join(', ')}]`;
-}
+import { canProposeSymmetry } from '../state/detection';
+import type { DetectionAction, DetectionState } from '../state/detection';
+import { FamilyPicker, PointGroupSelect, ProposedSymmetryBlock } from './symmetryControls';
+import { IntegerStepperField, VectorField } from './controls';
 
 type DetectAdjustSymmetryPanelProps = {
   dispatch: Dispatch<DetectionAction>;
-  onDetectFinerSymmetry: () => Promise<void>;
-  onDetectMajorAxis: () => Promise<void>;
+  nodeReady: boolean;
+  onConfirm: () => void;
+  onDetectFinerSymmetry: () => void;
+  onDetectMajorAxis: () => void;
+  onNext?: () => void;
   state: DetectionState;
 };
 
 export function DetectAdjustSymmetryPanel({
   dispatch,
+  nodeReady,
+  onConfirm,
   onDetectFinerSymmetry,
   onDetectMajorAxis,
+  onNext,
   state,
 }: DetectAdjustSymmetryPanelProps) {
   const majorReady = state.majorStatus === 'ready';
@@ -26,12 +30,12 @@ export function DetectAdjustSymmetryPanel({
   const canPropose = canProposeSymmetry(state);
 
   return (
-    <div className="symmetry-panel">
-      <section className="symmetry-section">
+    <div className="node-panel-stack">
+      <section className="node-section">
         <button
           className="button button-neutral"
           disabled={majorRunning}
-          onClick={() => void onDetectMajorAxis()}
+          onClick={onDetectMajorAxis}
           type="button"
         >
           {majorRunning ? 'Detecting major axis' : 'Detect major axis'}
@@ -42,156 +46,58 @@ export function DetectAdjustSymmetryPanel({
         ) : null}
 
         <div className="field-stack">
-          <label className="field-row">
-            <span className="field-label">axis</span>
-            <span className="vector-inputs">
-              <input
+          <VectorField
+            action={
+              <button
+                className="button button-neutral button-compact"
                 disabled={!majorReady}
-                onChange={(event) =>
-                  dispatch({
-                    axis: [Number(event.currentTarget.value), state.majorAxis[1], state.majorAxis[2]],
-                    type: 'majorAxisChanged',
-                  })
-                }
-                type="number"
-                value={state.majorAxis[0]}
-              />
-              <input
-                disabled={!majorReady}
-                onChange={(event) =>
-                  dispatch({
-                    axis: [state.majorAxis[0], Number(event.currentTarget.value), state.majorAxis[2]],
-                    type: 'majorAxisChanged',
-                  })
-                }
-                type="number"
-                value={state.majorAxis[1]}
-              />
-              <input
-                disabled={!majorReady}
-                onChange={(event) =>
-                  dispatch({
-                    axis: [state.majorAxis[0], state.majorAxis[1], Number(event.currentTarget.value)],
-                    type: 'majorAxisChanged',
-                  })
-                }
-                type="number"
-                value={state.majorAxis[2]}
-              />
-            </span>
-            <button
-              className="button button-neutral button-compact"
-              disabled={!majorReady}
-              onClick={() => dispatch({ type: 'majorAxisNormalized' })}
-              type="button"
-            >
-              normalize
-            </button>
-          </label>
+                onClick={() => dispatch({ type: 'majorAxisNormalized' })}
+                type="button"
+              >
+                normalize
+              </button>
+            }
+            disabled={!majorReady}
+            label="axis"
+            onChange={(axis) => dispatch({ axis, type: 'majorAxisChanged' })}
+            value={state.majorAxis}
+          />
 
-          <label className="field-row">
-            <span className="field-label">center</span>
-            <span className="vector-inputs">
-              <input
+          <VectorField
+            action={
+              <button
+                className="button button-neutral button-compact"
                 disabled={!majorReady}
-                onChange={(event) =>
-                  dispatch({
-                    center: [Number(event.currentTarget.value), state.center[1], state.center[2]],
-                    type: 'centerChanged',
-                  })
-                }
-                type="number"
-                value={state.center[0]}
-              />
-              <input
-                disabled={!majorReady}
-                onChange={(event) =>
-                  dispatch({
-                    center: [state.center[0], Number(event.currentTarget.value), state.center[2]],
-                    type: 'centerChanged',
-                  })
-                }
-                type="number"
-                value={state.center[1]}
-              />
-              <input
-                disabled={!majorReady}
-                onChange={(event) =>
-                  dispatch({
-                    center: [state.center[0], state.center[1], Number(event.currentTarget.value)],
-                    type: 'centerChanged',
-                  })
-                }
-                type="number"
-                value={state.center[2]}
-              />
-            </span>
-            <button
-              className="button button-neutral button-compact"
-              disabled={!majorReady}
-              onClick={() => dispatch({ type: 'centerNormalized' })}
-              type="button"
-            >
-              normalize
-            </button>
-          </label>
+                onClick={() => dispatch({ type: 'centerNormalized' })}
+                type="button"
+              >
+                normalize
+              </button>
+            }
+            disabled={!majorReady}
+            label="center"
+            onChange={(center) => dispatch({ center, type: 'centerChanged' })}
+            value={state.center}
+          />
 
-          <label className="field-row field-row--scalar">
-            <span className="field-label">fold</span>
-            <input
-              disabled={!majorReady}
-              min={1}
-              onChange={(event) =>
-                dispatch({ fold: Number(event.currentTarget.value), type: 'foldChanged' })
-              }
-              type="number"
-              value={state.fold}
-            />
-          </label>
+          <IntegerStepperField
+            disabled={!majorReady}
+            label="fold"
+            min={1}
+            onChange={(fold) => dispatch({ fold, type: 'foldChanged' })}
+            value={state.fold}
+          />
         </div>
       </section>
 
-      <section className="symmetry-section">
-        <div className="family-options">
-          <button
-            className={`choice-button${state.family === 'axial' ? ' choice-button--selected' : ''}`}
-            disabled={!majorReady}
-            onClick={() => dispatch({ family: 'axial', type: 'familyPicked' })}
-            type="button"
-          >
-            axial
-          </button>
-          <button
-            className={`choice-button${state.family === 'T' ? ' choice-button--selected' : ''}`}
-            disabled={!majorReady}
-            onClick={() => dispatch({ family: 'T', type: 'familyPicked' })}
-            type="button"
-          >
-            T
-          </button>
-          <button
-            className={`choice-button${state.family === 'O' ? ' choice-button--selected' : ''}`}
-            disabled={!majorReady}
-            onClick={() => dispatch({ family: 'O', type: 'familyPicked' })}
-            type="button"
-          >
-            O
-          </button>
-          <button
-            className={`choice-button${state.family === 'I' ? ' choice-button--selected' : ''}`}
-            disabled={!majorReady}
-            onClick={() => dispatch({ family: 'I', type: 'familyPicked' })}
-            type="button"
-          >
-            I
-          </button>
-        </div>
+      <section className="node-section">
+        <FamilyPicker disabled={!majorReady} dispatch={dispatch} value={state.family} />
 
         {state.family === 'axial' ? (
           <button
             className="button button-neutral"
             disabled={!canDetectFiner}
-            onClick={() => void onDetectFinerSymmetry()}
+            onClick={onDetectFinerSymmetry}
             type="button"
           >
             {finerRunning ? 'Detecting finer type' : 'Detect finer type'}
@@ -200,70 +106,27 @@ export function DetectAdjustSymmetryPanel({
       </section>
 
       {state.labels.length > 0 ? (
-        <section className="symmetry-section">
-          <label className="select-row">
-            <span className="field-label">Point group type</span>
-            <select
-              className="point-group-select"
-              onChange={(event) =>
-                dispatch({ label: event.currentTarget.value, type: 'labelPicked' })
-              }
-              value={state.selectedLabel}
-            >
-              {state.labels.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+        <section className="node-section">
+          <PointGroupSelect dispatch={dispatch} labels={state.labels} value={state.selectedLabel} />
         </section>
       ) : null}
 
       {state.family ? (
-        <section className="symmetry-section">
-          <label className="field-row">
-            <span className="field-label">minor</span>
-            <span className="vector-inputs">
-              <input
-                onChange={(event) =>
-                  dispatch({
-                    axis: [Number(event.currentTarget.value), state.minorAxis[1], state.minorAxis[2]],
-                    type: 'minorAxisChanged',
-                  })
-                }
-                type="number"
-                value={state.minorAxis[0]}
-              />
-              <input
-                onChange={(event) =>
-                  dispatch({
-                    axis: [state.minorAxis[0], Number(event.currentTarget.value), state.minorAxis[2]],
-                    type: 'minorAxisChanged',
-                  })
-                }
-                type="number"
-                value={state.minorAxis[1]}
-              />
-              <input
-                onChange={(event) =>
-                  dispatch({
-                    axis: [state.minorAxis[0], state.minorAxis[1], Number(event.currentTarget.value)],
-                    type: 'minorAxisChanged',
-                  })
-                }
-                type="number"
-                value={state.minorAxis[2]}
-              />
-            </span>
-            <button
-              className="button button-neutral button-compact"
-              onClick={() => dispatch({ type: 'minorAxisNormalized' })}
-              type="button"
-            >
-              normalize
-            </button>
-          </label>
+        <section className="node-section">
+          <VectorField
+            action={
+              <button
+                className="button button-neutral button-compact"
+                onClick={() => dispatch({ type: 'minorAxisNormalized' })}
+                type="button"
+              >
+                normalize
+              </button>
+            }
+            label="minor"
+            onChange={(axis) => dispatch({ axis, type: 'minorAxisChanged' })}
+            value={state.minorAxis}
+          />
         </section>
       ) : null}
 
@@ -273,40 +136,25 @@ export function DetectAdjustSymmetryPanel({
         onClick={() => dispatch({ type: 'proposeSymmetry' })}
         type="button"
       >
-        Confirm proposed symmetry
+        Visualize specified symmetry
       </button>
 
-      {state.proposedSymmetry ? (
-        <section className="symmetry-section proposed-symmetry">
-          <dl className="proposed-tuple">
-            <div className="proposed-row">
-              <dt>Point group label</dt>
-              <dd>{state.proposedSymmetry.label}</dd>
-            </div>
-            <div className="proposed-row">
-              <dt>major axis</dt>
-              <dd>{formatVector(state.proposedSymmetry.majorAxis)}</dd>
-            </div>
-            <div className="proposed-row">
-              <dt>minor axis</dt>
-              <dd>{formatVector(state.proposedSymmetry.minorAxis)}</dd>
-            </div>
-            <div className="proposed-row">
-              <dt>center</dt>
-              <dd>{formatVector(state.proposedSymmetry.center)}</dd>
-            </div>
-          </dl>
-        </section>
-      ) : null}
+      <ProposedSymmetryBlock symmetry={state.proposedSymmetry} />
 
       <button
         className="button button-primary"
-        disabled={!state.proposedSymmetry}
-        onClick={() => dispatch({ type: 'confirmSymmetry' })}
+        disabled={!state.proposedSymmetry || nodeReady}
+        onClick={onConfirm}
         type="button"
       >
         Confirm
       </button>
+
+      {onNext ? (
+        <button className="button button-primary" disabled={!nodeReady} onClick={onNext} type="button">
+          Start symmetry enforced generation
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -1,17 +1,16 @@
-import type { ModelId } from '../types';
-
-const modelOptions: Array<{ disabled: boolean; id: ModelId; label: string }> = [
-  { disabled: true, id: 'trellis', label: 'TRELLIS' },
-  { disabled: false, id: 'trellis2', label: 'TRELLIS.2' },
-  { disabled: true, id: 'sam3d_object', label: 'SAM-3D Object' },
-];
+import type { ModelId, ModelOption } from '../models/types';
 
 type ModelSelectionPanelProps = {
+  modelOptions: ModelOption[];
   onConfirm: () => void;
   selectedModelId: ModelId;
 };
 
-export function ModelSelectionPanel({ onConfirm, selectedModelId }: ModelSelectionPanelProps) {
+export function ModelSelectionPanel({
+  modelOptions,
+  onConfirm,
+  selectedModelId,
+}: ModelSelectionPanelProps) {
   return (
     <section className="pre-dag-panel glass-panel" aria-label="Model selection">
       <header className="pre-dag-panel-header">

@@ -1,0 +1,136 @@
+import type { ArtifactRef } from '../types';
+import type { Trellis2ExportParams } from '../models/trellis2';
+import { trellis2ExportDefaults } from '../models/trellis2';
+import { NumberField } from './generationControls';
+
+export type ExportStatus = 'idle' | 'running' | 'ready' | 'failed';
+
+export type ExportState = {
+  artifact: ArtifactRef | null;
+  bundleArtifact: ArtifactRef | null;
+  errorMessage: string;
+  log: string;
+  params: Trellis2ExportParams;
+  progress: number;
+  status: ExportStatus;
+};
+
+type ExportControlsProps = {
+  disabled?: boolean;
+  onExport: () => void;
+  onParamsChange: (params: Partial<Trellis2ExportParams>) => void;
+  state: ExportState;
+};
+
+const initialExportState: ExportState = {
+  artifact: null,
+  bundleArtifact: null,
+  errorMessage: '',
+  log: '',
+  params: trellis2ExportDefaults,
+  progress: 0,
+  status: 'idle',
+};
+
+export function ExportControls({
+  disabled = false,
+  onExport,
+  onParamsChange,
+  state,
+}: ExportControlsProps) {
+  const running = state.status === 'running';
+  const canExtract = !disabled && !running;
+  const canDownloadGlb = state.status === 'ready' && Boolean(state.artifact);
+  const canDownloadBundle = state.status === 'ready' && Boolean(state.bundleArtifact);
+  const progressPercent = Math.round(state.progress * 100);
+
+  return (
+    <section className="node-section export-section">
+      <NumberField
+        disabled={running}
+        label="face decimation target"
+        onChange={(faceDecimationTarget) =>
+          onParamsChange({ faceDecimationTarget: Math.trunc(faceDecimationTarget) })
+        }
+        step={1000}
+        value={state.params.faceDecimationTarget}
+      />
+      <NumberField
+        disabled={running}
+        label="texture size"
+        onChange={(textureSize) => onParamsChange({ textureSize: Math.trunc(textureSize) })}
+        step={1}
+        value={state.params.textureSize}
+      />
+      <label className="export-checkbox-row">
+        <span className="field-label">remesh</span>
+        <input
+          checked={state.params.remesh}
+          disabled={running}
+          onChange={(event) => onParamsChange({ remesh: event.currentTarget.checked })}
+          type="checkbox"
+        />
+      </label>
+      <NumberField
+        disabled={running}
+        label="remesh band"
+        onChange={(remeshBand) => onParamsChange({ remeshBand })}
+        step={0.01}
+        value={state.params.remeshBand}
+      />
+      <NumberField
+        disabled={running}
+        label="remesh project"
+        onChange={(remeshProject) => onParamsChange({ remeshProject })}
+        step={0.01}
+        value={state.params.remeshProject}
+      />
+
+      <div className="export-progress">
+        <div className="generation-progress-row">
+          <span>{progressPercent}%</span>
+          <span>{state.status}</span>
+        </div>
+        <div className="generation-progress-track">
+          <div className="generation-progress-fill" style={{ width: `${progressPercent}%` }} />
+        </div>
+        <p>{state.log || 'Export has not started.'}</p>
+      </div>
+
+      <button
+        className="button button-neutral"
+        disabled={!canExtract}
+        onClick={onExport}
+        type="button"
+      >
+        Extract GLB
+      </button>
+
+      {canDownloadGlb && state.artifact ? (
+        <a className="button button-primary export-download" href={state.artifact.url}>
+          Download GLB
+        </a>
+      ) : (
+        <button className="button button-primary" disabled type="button">
+          Download GLB
+        </button>
+      )}
+
+      {canDownloadBundle && state.bundleArtifact ? (
+        <a className="button button-primary export-download" href={state.bundleArtifact.url}>
+          Download GLB and all latents
+        </a>
+      ) : (
+        <button className="button button-primary" disabled type="button">
+          Download GLB and all latents
+        </button>
+      )}
+
+      {state.status === 'failed' ? (
+        <p className="export-error">{state.errorMessage || 'Export failed.'}</p>
+      ) : null}
+    </section>
+  );
+}
+
+ExportControls.initialState = initialExportState;

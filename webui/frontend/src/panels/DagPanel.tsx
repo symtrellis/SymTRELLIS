@@ -1,14 +1,23 @@
 import { useEffect, useState } from 'react';
-import type { DagEdge, DagNode, DagStatus, NodeId } from '../types';
+import type {
+  DagEdgeRoute,
+  DagStatusByNode,
+  ModelDagEdge,
+  ModelDagLayout,
+  ModelDagNode,
+  NodeInstanceId,
+} from '../models/types';
+import type { DagStatus } from '../types';
 
 type DagPanelProps = {
-  currentNodeId: NodeId;
-  edges: DagEdge[];
-  nodes: DagNode[];
-  statusByNode: Record<NodeId, DagStatus>;
+  chosenEdgeIds: string[];
+  currentNodeId: NodeInstanceId;
+  edges: ModelDagEdge[];
+  layout: ModelDagLayout;
+  nodes: ModelDagNode[];
+  statusByNode: DagStatusByNode;
 };
 
-type Lane = 'left' | 'main';
 type Side = 'top' | 'right' | 'bottom' | 'left';
 
 type Point = {
@@ -19,7 +28,7 @@ type Point = {
 type NodeBox = {
   current: boolean;
   height: number;
-  id: NodeId;
+  id: NodeInstanceId;
   label: string;
   status: DagStatus;
   width: number;
@@ -33,22 +42,11 @@ type EdgeRoute = {
   status: DagStatus;
 };
 
-type DagLayout = {
+type RenderedDag = {
   edges: EdgeRoute[];
   height: number;
   nodes: NodeBox[];
   width: number;
-};
-
-const nodeLayout: Record<NodeId, { lane: Lane; rank: number }> = {
-  img_cond: { lane: 'main', rank: 0 },
-  nat_ss: { lane: 'main', rank: 1 },
-  nat_shape: { lane: 'main', rank: 2 },
-  manual_sym: { lane: 'left', rank: 3 },
-  detect_sym: { lane: 'main', rank: 3 },
-  sym_ss: { lane: 'main', rank: 4 },
-  sym_shape: { lane: 'main', rank: 5 },
-  texture: { lane: 'main', rank: 6 },
 };
 
 function useMediaQuery(query: string) {
@@ -64,19 +62,14 @@ function useMediaQuery(query: string) {
   return matches;
 }
 
-function edgeStatus(edge: DagEdge, statusByNode: Record<NodeId, DagStatus>): DagStatus {
-  const sourceStatus = statusByNode[edge.source];
+function edgeStatus(edge: ModelDagEdge, statusByNode: DagStatusByNode, chosenEdgeIds: string[]): DagStatus {
   const targetStatus = statusByNode[edge.target];
 
-  if (sourceStatus === 'completed' && targetStatus === 'completed') {
-    return 'completed';
+  if (!chosenEdgeIds.includes(edge.id)) {
+    return 'inactive';
   }
 
-  if (sourceStatus === 'completed' && targetStatus === 'current') {
-    return 'current';
-  }
-
-  return 'inactive';
+  return targetStatus === 'current' ? 'current' : 'completed';
 }
 
 function nodeWidth(label: string, compact: boolean) {
@@ -133,24 +126,30 @@ function roundedPath(points: Point[], radius: number) {
   return parts.join(' ');
 }
 
-function edgePoints(edge: DagEdge, boxById: Map<NodeId, NodeBox>, width: number, compact: boolean) {
+function edgePoints(
+  edge: ModelDagEdge,
+  route: DagEdgeRoute,
+  boxById: Map<NodeInstanceId, NodeBox>,
+  width: number,
+  compact: boolean,
+) {
   const source = boxById.get(edge.source)!;
   const target = boxById.get(edge.target)!;
   const overlap = compact ? 4 : 6;
 
-  if (edge.id === 'img_cond-manual_sym') {
+  if (route === 'side_branch') {
     const start = sidePoint(source, 'left', overlap);
     const end = sidePoint(target, 'top', overlap);
     return [start, { x: end.x, y: start.y }, end];
   }
 
-  if (edge.id === 'manual_sym-sym_ss') {
+  if (route === 'side_merge') {
     const start = sidePoint(source, 'bottom', overlap);
     const end = sidePoint(target, 'left', overlap);
     return [start, { x: start.x, y: end.y }, end];
   }
 
-  if (edge.id === 'nat_shape-texture') {
+  if (route === 'right_bypass') {
     const start = sidePoint(source, 'right', overlap);
     const end = sidePoint(target, 'right', overlap);
     const routeX = width - (compact ? 7 : 14);
@@ -160,40 +159,36 @@ function edgePoints(edge: DagEdge, boxById: Map<NodeId, NodeBox>, width: number,
   return [sidePoint(source, 'bottom', overlap), sidePoint(target, 'top', overlap)];
 }
 
-function layoutDag(
-  nodes: DagNode[],
-  edges: DagEdge[],
+function renderDag(
+  nodes: ModelDagNode[],
+  edges: ModelDagEdge[],
+  dagLayout: ModelDagLayout,
   compact: boolean,
-  currentNodeId: NodeId,
-  statusByNode: Record<NodeId, DagStatus>,
-): DagLayout {
+  currentNodeId: NodeInstanceId,
+  statusByNode: DagStatusByNode,
+  chosenEdgeIds: string[],
+): RenderedDag {
   const nodeHeightValue = nodeHeight(compact);
   const rankGap = compact ? 10 : 22;
   const margin = compact ? 6 : 8;
   const laneGap = compact ? 10 : 7;
   const rightRouteGap = compact ? 12 : 28;
-  const maxRank = Math.max(...nodes.map((node) => nodeLayout[node.id].rank));
+  const maxRank = Math.max(...nodes.map((node) => dagLayout.nodes[node.id].rank));
   const measuredNodes = nodes.map((node) => ({
     ...node,
     height: nodeHeightValue,
     width: nodeWidth(node.shortLabel, compact),
   }));
-  const leftWidth = Math.max(
-    ...measuredNodes
-      .filter((node) => nodeLayout[node.id].lane === 'left')
-      .map((node) => node.width),
-  );
-  const mainWidth = Math.max(
-    ...measuredNodes
-      .filter((node) => nodeLayout[node.id].lane === 'main')
-      .map((node) => node.width),
-  );
+  const leftNodes = measuredNodes.filter((node) => dagLayout.nodes[node.id].lane === 'left');
+  const mainNodes = measuredNodes.filter((node) => dagLayout.nodes[node.id].lane === 'main');
+  const leftWidth = Math.max(0, ...leftNodes.map((node) => node.width));
+  const mainWidth = Math.max(0, ...mainNodes.map((node) => node.width));
   const leftCenterX = margin + leftWidth / 2;
   const mainCenterX = margin + leftWidth + laneGap + mainWidth / 2;
   const width = margin * 2 + leftWidth + laneGap + mainWidth + rightRouteGap;
   const height = margin * 2 + (maxRank + 1) * nodeHeightValue + maxRank * rankGap;
   const boxes = measuredNodes.map((node) => {
-    const layout = nodeLayout[node.id];
+    const layout = dagLayout.nodes[node.id];
     const centerX = layout.lane === 'left' ? leftCenterX : mainCenterX;
     return {
       current: node.id === currentNodeId,
@@ -207,37 +202,40 @@ function layoutDag(
     };
   });
   const boxById = new Map(boxes.map((node) => [node.id, node]));
-  const routes = edges.map((edge) => ({
-    id: edge.id,
-    path: roundedPath(edgePoints(edge, boxById, width, compact), compact ? 6 : 12),
-    status: edgeStatus(edge, statusByNode),
-  }));
+  const edgeRoutes = edges.map((edge) => {
+    const route = dagLayout.edges[edge.id].route;
+    return {
+      id: edge.id,
+      path: roundedPath(edgePoints(edge, route, boxById, width, compact), compact ? 6 : 12),
+      status: edgeStatus(edge, statusByNode, chosenEdgeIds),
+    };
+  });
 
-  return { edges: routes, height, nodes: boxes, width };
+  return { edges: edgeRoutes, height, nodes: boxes, width };
 }
 
-export function DagPanel({ currentNodeId, edges, nodes, statusByNode }: DagPanelProps) {
+export function DagPanel({ chosenEdgeIds, currentNodeId, edges, layout, nodes, statusByNode }: DagPanelProps) {
   const compact = useMediaQuery('(max-width: 760px)');
-  const layout = layoutDag(nodes, edges, compact, currentNodeId, statusByNode);
+  const rendered = renderDag(nodes, edges, layout, compact, currentNodeId, statusByNode, chosenEdgeIds);
 
   return (
     <section
       className="dag-panel"
-      style={{ height: layout.height, width: layout.width }}
+      style={{ height: rendered.height, width: rendered.width }}
       aria-label="Generation path"
     >
       <svg
         className="dag-edges"
-        viewBox={`0 0 ${layout.width} ${layout.height}`}
+        viewBox={`0 0 ${rendered.width} ${rendered.height}`}
         aria-hidden="true"
       >
-        {layout.edges.map((edge) => (
+        {rendered.edges.map((edge) => (
           <path key={edge.id} className="dag-edge dag-edge--base" d={edge.path} />
         ))}
       </svg>
 
       <div className="dag-nodes">
-        {layout.nodes.map((node) => (
+        {rendered.nodes.map((node) => (
           <div
             key={node.id}
             className={`dag-node dag-node--${node.status}${node.current ? ' dag-node--active' : ''}`}
@@ -256,10 +254,10 @@ export function DagPanel({ currentNodeId, edges, nodes, statusByNode }: DagPanel
 
       <svg
         className="dag-progress-edges"
-        viewBox={`0 0 ${layout.width} ${layout.height}`}
+        viewBox={`0 0 ${rendered.width} ${rendered.height}`}
         aria-hidden="true"
       >
-        {layout.edges.map((edge) =>
+        {rendered.edges.map((edge) =>
           edge.status !== 'inactive' ? (
             <path
               key={edge.id}

@@ -2,41 +2,40 @@ export type ThemeMode = 'light' | 'dark';
 
 export type Vector3 = [number, number, number];
 
-export type AppStage = 'model_selection' | 'dag';
-
-export type ModelId = 'trellis' | 'trellis2' | 'sam3d_object';
-
-export type ViewerContent =
-  | { kind: 'empty' }
-  | {
-      kind: 'glb';
-      material: 'neutral' | 'source';
-      orientation?: 'mock_test_glb';
-      url: string;
-    };
-
-export type NodeId =
-  | 'img_cond'
-  | 'nat_ss'
-  | 'nat_shape'
-  | 'detect_sym'
-  | 'manual_sym'
-  | 'sym_ss'
-  | 'sym_shape'
-  | 'texture';
-
 export type DagStatus = 'inactive' | 'completed' | 'current';
 
-export type DagNode = {
-  id: NodeId;
-  label: string;
-  shortLabel: string;
+export type ArtifactKey = string;
+
+export type NodeRunKey = string;
+
+export type ActionKey = string;
+
+export type RequestId = string;
+
+export type ArtifactRef = {
+  artifactKey: ArtifactKey;
+  filename: string;
+  kind: string;
+  metadata?: Record<string, unknown>;
+  mimeType: string;
+  url: string;
 };
 
-export type DagEdge = {
-  id: string;
-  source: NodeId;
-  target: NodeId;
+export type NodeRunRef = {
+  artifactRefs: Record<string, ArtifactRef>;
+  key: NodeRunKey;
+  metadata: Record<string, unknown>;
+  operationId: string;
+};
+
+export type ActionKind = 'detect_rotation_symmetry' | 'detect_finer_symmetry' | 'export';
+
+export type ActionRef = {
+  actionKind: ActionKind;
+  artifactRefs: Record<string, ArtifactRef>;
+  key: ActionKey;
+  metadata: Record<string, unknown>;
+  operationId: string;
 };
 
 export type SymmetryFamily = 'axial' | 'T' | 'O' | 'I';

@@ -3,13 +3,12 @@ import { ArrowLeft } from 'lucide-react';
 
 type NodePanelProps = {
   children: ReactNode;
-  footer?: ReactNode;
   instruction?: ReactNode;
   onBack?: () => void;
   title: string;
 };
 
-export function NodePanel({ children, footer, instruction, onBack, title }: NodePanelProps) {
+export function NodePanel({ children, instruction, onBack, title }: NodePanelProps) {
   return (
     <section className="node-panel glass-panel" aria-label={title}>
       <header className="node-panel-header">
@@ -29,8 +28,6 @@ export function NodePanel({ children, footer, instruction, onBack, title }: Node
       </header>
 
       <div className="node-panel-body">{children}</div>
-
-      {footer ? <footer className="node-panel-footer">{footer}</footer> : null}
     </section>
   );
 }

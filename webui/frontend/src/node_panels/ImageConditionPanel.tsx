@@ -1,5 +1,5 @@
 import type { ChangeEvent, ClipboardEvent, DragEvent } from 'react';
-import type { ImageConditionState } from '../state';
+import type { ImageConditionState } from '../state/imageCondition';
 
 type ImageInput = {
   file: Blob | File;
@@ -7,9 +7,9 @@ type ImageInput = {
 };
 
 type ImageConditionPanelProps = {
-  onEnterManualSymmetry: () => void;
   onGenerateCondition: () => void;
   onImageSelected: (file: Blob | File, name: string) => void;
+  routeActions: Array<{ label: string; onClick: () => void }>;
   state: ImageConditionState;
 };
 
@@ -27,13 +27,14 @@ function imageInputFromClipboard(event: ClipboardEvent<HTMLElement>): ImageInput
 }
 
 export function ImageConditionPanel({
-  onEnterManualSymmetry,
   onGenerateCondition,
   onImageSelected,
+  routeActions,
   state,
 }: ImageConditionPanelProps) {
-  const hasImage = Boolean(state.uploadedImageName);
-  const conditionReady = state.conditionStatus === 'ready';
+  const hasImage = Boolean(state.previewName);
+  const conditionReady = state.status === 'ready';
+  const running = state.status === 'uploading' || state.status === 'generating';
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
 
@@ -63,8 +64,8 @@ export function ImageConditionPanel({
   };
 
   return (
-    <div className="symmetry-panel">
-      <section className="symmetry-section">
+    <div className="node-panel-stack">
+      <section className="node-section">
         <label
           className="upload-box"
           onDragOver={handleDragOver}
@@ -72,17 +73,13 @@ export function ImageConditionPanel({
           onPaste={handlePaste}
           tabIndex={0}
         >
-          <input
-            accept="image/*"
-            onChange={handleFileChange}
-            type="file"
-          />
-          {state.uploadedImageUrl ? (
+          <input accept="image/*" onChange={handleFileChange} type="file" />
+          {state.previewUrl ? (
             <span className="upload-preview">
-              <img alt={state.uploadedImageName} src={state.uploadedImageUrl} />
+              <img alt={state.previewName} src={state.previewUrl} />
             </span>
           ) : null}
-          <span className="upload-box-title">{hasImage ? state.uploadedImageName : 'Upload image'}</span>
+          <span className="upload-box-title">{hasImage ? state.previewName : 'Upload image'}</span>
           <span className="upload-box-detail">
             {hasImage ? 'ready for condition generation' : 'drop, choose, or paste an input image'}
           </span>
@@ -90,7 +87,7 @@ export function ImageConditionPanel({
 
         <button
           className="button button-neutral"
-          disabled={!hasImage}
+          disabled={!hasImage || running}
           onClick={onGenerateCondition}
           type="button"
         >
@@ -98,18 +95,19 @@ export function ImageConditionPanel({
         </button>
       </section>
 
-      {conditionReady ? (
-        <section className="symmetry-section">
-          <button
-            className="button button-neutral"
-            onClick={onEnterManualSymmetry}
-            type="button"
-          >
-            Manually specify symmetry
-          </button>
-          <button className="button button-neutral" disabled type="button">
-            Native generation and detect
-          </button>
+      {routeActions.length > 0 ? (
+        <section className="node-section">
+          {routeActions.map((action) => (
+            <button
+              className="button button-neutral"
+              disabled={!conditionReady}
+              key={action.label}
+              onClick={action.onClick}
+              type="button"
+            >
+              {action.label}
+            </button>
+          ))}
         </section>
       ) : null}
     </div>
