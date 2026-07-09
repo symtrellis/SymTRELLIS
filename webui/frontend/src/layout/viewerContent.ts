@@ -1,11 +1,10 @@
-import { artifactByRole } from '../api/artifacts';
+import { outputByRole } from '../api/storage';
 import type { ModelDagNode, ModelSpec } from '../models/types';
 import type { DetectionState } from '../state/detection';
 import type { ManualSymmetryState } from '../state/symmetry';
 import type { WorkflowState } from '../state/workflow';
-import type { ArtifactRef, SymmetryTuple } from '../types';
-import { emptyViewerContent } from '../viewer/viewerTypes';
-import type { ViewerContent } from '../viewer/viewerTypes';
+import type { SymmetryTuple } from '../types';
+import { emptyViewerContent, type ViewerContent } from '../viewer/viewerTypes';
 
 type ViewerContentForWorkflowInput = {
   confirmedSymmetry: SymmetryTuple | null;
@@ -28,61 +27,52 @@ export function viewerContentForWorkflow({
     return emptyViewerContent;
   }
 
+  const rule = modelSpec.viewer[currentNode.id];
+  let glb: ViewerContent['glb'] = null;
+
+  if (rule) {
+    for (const candidate of rule.outputCandidates) {
+      const nodeRun = workflow.nodeRunsByNode[candidate.nodeId];
+      const output = nodeRun ? outputByRole(nodeRun.outputs, candidate.roles) : null;
+
+      if (output) {
+        glb = {
+          material: candidate.material,
+          url: output.url,
+        };
+        break;
+      }
+    }
+  }
+
+  const baseContent: ViewerContent = {
+    ...emptyViewerContent,
+    glb,
+  };
+
   if (currentNode.kind === 'detect_adjust_symmetry') {
     return {
-      ...contentForModelRule(modelSpec, workflow, currentNode.id),
+      ...baseContent,
       overlays: detectionState.overlays,
-      selectedOverlayId: detectionState.selectedOverlayId,
       selectableOverlayIds: detectionState.selectableOverlayIds,
+      selectedOverlayId: detectionState.selectedOverlayId,
       symmetryPreview: detectionState.symmetryPreview,
     };
   }
 
   if (currentNode.kind === 'manual_symmetry') {
     return {
-      ...emptyViewerContent,
+      ...baseContent,
       symmetryPreview: manualSymmetryState.symmetryPreview,
     };
   }
 
-  const content = contentForModelRule(modelSpec, workflow, currentNode.id);
-  if (modelSpec.viewer[currentNode.id]?.showConfirmedSymmetryPreview) {
+  if (rule?.showConfirmedSymmetryPreview) {
     return {
-      ...content,
+      ...baseContent,
       symmetryPreview: confirmedSymmetry,
     };
   }
 
-  return content;
-}
-
-function contentForModelRule(
-  modelSpec: ModelSpec,
-  workflow: WorkflowState,
-  nodeId: string,
-): ViewerContent {
-  const rule = modelSpec.viewer[nodeId];
-  if (!rule) {
-    return emptyViewerContent;
-  }
-
-  const glb = rule.artifactCandidates.reduce<ViewerContent['glb']>((currentGlb, candidate) => {
-    if (currentGlb) {
-      return currentGlb;
-    }
-
-    return glbContentForArtifact(
-      artifactByRole(workflow.nodeRunsByNode[candidate.nodeId]?.artifactRefs ?? {}, candidate.roles),
-      candidate.material,
-    );
-  }, null);
-
-  return {
-    ...emptyViewerContent,
-    glb,
-  };
-}
-
-function glbContentForArtifact(artifact: ArtifactRef | null, material: 'neutral' | 'source') {
-  return artifact ? { material, url: artifact.url } : null;
+  return baseContent;
 }

@@ -18,7 +18,9 @@ def window_attn_backend_xformers(
     v: torch.Tensor,
     q_cu: torch.Tensor,
     k_cu: torch.Tensor,
+    min_seqlen_q: int,
     max_seqlen_q: int,
+    min_seqlen_k: int,
     max_seqlen_k: int,
 ) -> torch.Tensor:
     """Run xFormers block-diagonal window attention from GPU cu-seqlens.
@@ -34,17 +36,19 @@ def window_attn_backend_xformers(
             starts, where `q_cu[0] == 0` and `q_cu[-1] == total_q`.
         k_cu: Int32 tensor with shape [num_windows + 1]. Cumulative key/value
             row starts, where `k_cu[-1] == total_kv`.
-        max_seqlen_q: Static upper bound for query tokens per window.
-        max_seqlen_k: Static upper bound for key/value tokens per window.
+        min_seqlen_q: Actual minimum number of query tokens in any window.
+        max_seqlen_q: Actual maximum number of query tokens in any window.
+        min_seqlen_k: Actual minimum number of key/value tokens in any window.
+        max_seqlen_k: Actual maximum number of key/value tokens in any window.
 
     Returns:
         Tensor with shape [total_q, num_heads, head_dim].
 
     This intentionally avoids `BlockDiagonalMask.from_seqlens(...)`, because
     that path needs Python length lists and would require `tolist()` on CUDA
-    tensors. `_SeqLenInfo` is a private xFormers API; `seqstart` carries the
-    real GPU cu-seqlens, while `seqstart_py` is dummy Python metadata. Because
-    some xFormers backends inspect `seqstart_py`, this path must force CUTLASS.
+    tensors. `_SeqLenInfo` is a private xFormers API: `seqstart` carries the
+    real GPU cu-seqlens, while exact min/max lengths come from `WindowIndex`.
+    `seqstart_py` is dummy Python metadata, so this path must force CUTLASS.
     """
     qq = q.unsqueeze(0).contiguous()
     kk = k.unsqueeze(0).contiguous()
@@ -55,13 +59,13 @@ def window_attn_backend_xformers(
     q_seqinfo = _SeqLenInfo(
         seqstart=q_cu,
         max_seqlen=max_seqlen_q,
-        min_seqlen=1,
+        min_seqlen=min_seqlen_q,
         seqstart_py=[0] * q_cu.shape[0],
     )
     k_seqinfo = _SeqLenInfo(
         seqstart=k_cu,
         max_seqlen=max_seqlen_k,
-        min_seqlen=1,
+        min_seqlen=min_seqlen_k,
         seqstart_py=[0] * k_cu.shape[0],
     )
     bias = BlockDiagonalMask(q_seqinfo=q_seqinfo, k_seqinfo=k_seqinfo)
@@ -98,15 +102,15 @@ def window_attn_backend_flash_attn(
             starts, where `q_cu[0] == 0` and `q_cu[-1] == total_q`.
         k_cu: Int32 tensor with shape [num_windows + 1]. Cumulative key/value
             row starts, where `k_cu[-1] == total_kv`.
-        max_seqlen_q: Static upper bound for query tokens per window.
-        max_seqlen_k: Static upper bound for key/value tokens per window.
+        max_seqlen_q: Actual maximum number of query tokens in any window.
+        max_seqlen_k: Actual maximum number of key/value tokens in any window.
 
     Returns:
         Tensor with shape [total_q, num_heads, head_dim].
 
     flash-attn's varlen API accepts GPU cu-seqlens directly, so this backend
     does not need `tolist()` or `max().item()`. The max sequence lengths are
-    passed as static Python integers from the configured window volume.
+    cached in `WindowIndex`.
     """
     if q.dtype == torch.float32:
         raise ValueError("flash-attn usually does not support float32. Use xformers for fp32.")
@@ -144,8 +148,8 @@ class WindowMultiHeadAttention(nn.Module):
             `num_heads`.
         ctx_feat_dim: Feature width of the context branch. Defaults to
             `feat_dim` for self-attention.
-        window_size: Window side lengths in grid cells. Used only to provide a
-            static max sequence length to the backend.
+        window_size: Window side lengths in grid cells used by the matching
+            `WindowIndex`.
         shift_window: Window shift used by the matching `WindowIndex`.
         qkv_bias: Whether to use bias in query/key/value projections.
         use_rope: Whether to apply rotary position embedding to q and k.
@@ -182,7 +186,6 @@ class WindowMultiHeadAttention(nn.Module):
 
         self.window_size = window_size
         self.shift_window = shift_window
-        self.max_window_tokens = window_size[0] * window_size[1] * window_size[2]
         self.use_rope = use_rope
         self.qk_rms_norm = qk_rms_norm
         self.attn_backend = attn_backend
@@ -263,8 +266,8 @@ class WindowMultiHeadAttention(nn.Module):
             q = self.q_rms_norm(q)
             k = self.k_rms_norm(k)
 
-        # Backend calls consume GPU cu-seqlens directly; no Python seqlen lists
-        # are constructed here.
+        # Backend calls consume GPU cu-seqlens plus cached min/max seqlens; no
+        # Python seqlen lists are constructed here.
         if self.attn_backend == "xformers":
             out = window_attn_backend_xformers(
                 q,
@@ -272,8 +275,10 @@ class WindowMultiHeadAttention(nn.Module):
                 v,
                 q_cu,
                 kv_cu,
-                self.max_window_tokens,
-                self.max_window_tokens,
+                window_index.q_min_seqlen,
+                window_index.q_max_seqlen,
+                window_index.kv_min_seqlen,
+                window_index.kv_max_seqlen,
             )
         elif self.attn_backend == "flash_attn":
             out = window_attn_backend_flash_attn(
@@ -282,8 +287,8 @@ class WindowMultiHeadAttention(nn.Module):
                 v,
                 q_cu,
                 kv_cu,
-                self.max_window_tokens,
-                self.max_window_tokens,
+                window_index.q_max_seqlen,
+                window_index.kv_max_seqlen,
             )
         else:
             raise ValueError(f"Unknown attention module: {self.attn_backend}")

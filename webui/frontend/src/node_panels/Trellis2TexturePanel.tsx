@@ -48,7 +48,7 @@ export function Trellis2TexturePanel({
   state,
 }: Trellis2TexturePanelProps) {
   const running = state.run.status === 'running';
-  const readyForNext = state.run.status === 'ready' && Boolean(state.run.outputArtifact);
+  const readyForNext = state.run.status === 'ready' && Boolean(state.run.result);
 
   return (
     <div className="node-panel-stack">
@@ -69,7 +69,7 @@ export function Trellis2TexturePanel({
       />
 
       <ExportControls
-        disabled={state.run.status !== 'ready' || !state.run.outputArtifact}
+        disabled={state.run.status !== 'ready' || !state.run.result}
         onExport={onExport}
         onParamsChange={onExportParamsChange}
         state={exportState}

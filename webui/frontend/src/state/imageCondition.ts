@@ -1,118 +1,133 @@
-import type { ArtifactRef, NodeRunRef } from '../types';
+import type { NodeRunResult, UploadRef } from '../types';
 
 export type ImageConditionStatus = 'idle' | 'uploading' | 'generating' | 'ready' | 'failed';
 
 export type ImageConditionState = {
-  conditionArtifact: ArtifactRef | null;
   errorMessage: string;
-  inputArtifact: ArtifactRef | null;
-  nodeRun: NodeRunRef | null;
-  previewFile: Blob | File | null;
+  file: Blob | File | null;
   previewName: string;
   previewUrl: string;
+  run: NodeRunResult | null;
   status: ImageConditionStatus;
+  upload: UploadRef | null;
 };
 
 export type ImageConditionAction =
-  | { file: Blob | File; name: string; type: 'imageSelected'; url: string }
-  | { type: 'conditionGenerationStarted' }
-  | { artifact: ArtifactRef; type: 'inputUploaded' }
-  | { conditionArtifact: ArtifactRef; nodeRun: NodeRunRef; type: 'conditionGenerated' }
-  | { message: string; type: 'conditionGenerationFailed' }
-  | { type: 'conditionResultCleared' }
-  | { type: 'reset' };
+  | {
+      file: Blob | File;
+      name: string;
+      type: 'imageSelected';
+      url: string;
+    }
+  | {
+      type: 'conditionGenerationStarted';
+    }
+  | {
+      type: 'inputUploaded';
+      upload: UploadRef;
+    }
+  | {
+      run: NodeRunResult;
+      type: 'conditionGenerated';
+    }
+  | {
+      message: string;
+      type: 'conditionGenerationFailed';
+    }
+  | {
+      type: 'resetToNodeStart';
+    };
 
-export const initialImageConditionState: ImageConditionState = {
-  conditionArtifact: null,
-  errorMessage: '',
-  inputArtifact: null,
-  nodeRun: null,
-  previewFile: null,
-  previewName: '',
-  previewUrl: '',
-  status: 'idle',
-};
+export function createInitialImageConditionState(): ImageConditionState {
+  return {
+    errorMessage: '',
+    file: null,
+    previewName: '',
+    previewUrl: '',
+    run: null,
+    status: 'idle',
+    upload: null,
+  };
+}
 
 export function imageConditionReducer(
   state: ImageConditionState,
   action: ImageConditionAction,
 ): ImageConditionState {
-  if (action.type === 'imageSelected') {
-    return {
-      ...state,
-      conditionArtifact: null,
-      errorMessage: '',
-      inputArtifact: null,
-      nodeRun: null,
-      previewFile: action.file,
-      previewName: action.name,
-      previewUrl: action.url,
-      status: 'idle',
-    };
-  }
+  switch (action.type) {
+    case 'imageSelected':
+      return {
+        errorMessage: '',
+        file: action.file,
+        previewName: action.name,
+        previewUrl: action.url,
+        run: null,
+        status: 'idle',
+        upload: null,
+      };
 
-  if (action.type === 'conditionGenerationStarted') {
-    return {
-      ...state,
-      conditionArtifact: null,
-      errorMessage: '',
-      inputArtifact: null,
-      nodeRun: null,
-      status: 'uploading',
-    };
-  }
+    case 'conditionGenerationStarted':
+      return {
+        ...state,
+        errorMessage: '',
+        run: null,
+        status: 'uploading',
+        upload: null,
+      };
 
-  if (action.type === 'inputUploaded') {
-    return { ...state, inputArtifact: action.artifact, status: 'generating' };
-  }
+    case 'inputUploaded':
+      return {
+        ...state,
+        status: 'generating',
+        upload: action.upload,
+      };
 
-  if (action.type === 'conditionGenerated') {
-    return {
-      ...state,
-      conditionArtifact: action.conditionArtifact,
-      errorMessage: '',
-      nodeRun: action.nodeRun,
-      status: 'ready',
-    };
-  }
+    case 'conditionGenerated':
+      return {
+        ...state,
+        errorMessage: '',
+        run: action.run,
+        status: 'ready',
+      };
 
-  if (action.type === 'conditionResultCleared') {
-    return {
-      ...state,
-      conditionArtifact: null,
-      errorMessage: '',
-      nodeRun: null,
-      status: 'idle',
-    };
-  }
+    case 'conditionGenerationFailed':
+      return {
+        ...state,
+        errorMessage: action.message,
+        status: 'failed',
+      };
 
-  if (action.type === 'reset') {
-    return initialImageConditionState;
+    case 'resetToNodeStart':
+      return {
+        ...state,
+        errorMessage: '',
+        run: null,
+        status: 'idle',
+        upload: null,
+      };
   }
-
-  return { ...state, errorMessage: action.message, status: 'failed' };
 }
 
-export function imageConditionInstruction(state: ImageConditionState) {
-  if (!state.previewFile) {
-    return 'Choose, drop, or paste an input image. The viewer remains available for camera checks.';
+export function imageConditionInstruction(state: ImageConditionState): string {
+  if (!state.file) {
+    return 'Choose, drop, or paste an input image.';
   }
 
   if (state.status === 'uploading') {
-    return 'Uploading the selected image as an input artifact before condition generation.';
+    return 'Uploading image.';
   }
 
   if (state.status === 'generating') {
-    return 'Generating the image condition from the uploaded artifact.';
+    return 'Generating image condition.';
   }
 
   if (state.status === 'ready') {
-    return 'Image condition is ready. Choose the next route in the workflow.';
+    return 'Image condition is ready. Choose the next route.';
   }
 
   if (state.status === 'failed') {
-    return state.errorMessage || 'Image condition generation failed.';
+    return state.errorMessage;
   }
 
-  return 'Generate the image condition, then choose manual symmetry or vanilla generation.';
+  return 'Generate image condition before choosing the next route.';
 }

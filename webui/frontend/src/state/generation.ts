@@ -1,4 +1,4 @@
-import type { ArtifactRef, NodeRunRef } from '../types';
+import type { NodeRunResult, RequestId } from '../types';
 
 export type DurationRange = [number, number];
 
@@ -21,9 +21,9 @@ export type GenerationStatus = 'idle' | 'running' | 'ready' | 'failed';
 
 export type GenerationRunState = {
   errorMessage: string;
-  nodeRun: NodeRunRef | null;
-  outputArtifact: ArtifactRef | null;
   progress: number;
+  requestId: RequestId | null;
+  result: NodeRunResult | null;
   status: GenerationStatus;
 };
 
@@ -34,27 +34,52 @@ export type GenerationState<Params extends CommonGenerationParams, Metadata> = {
 };
 
 export type GenerationAction<Params extends CommonGenerationParams, Metadata> =
-  | { params: Partial<Params>; type: 'paramsChanged' }
-  | { type: 'seedRandomized' }
-  | { type: 'generationStarted' }
-  | { progress: number; type: 'generationProgressed' }
+  | {
+      params: Partial<Params>;
+      type: 'paramsChanged';
+    }
+  | {
+      type: 'seedRandomized';
+    }
+  | {
+      requestId: RequestId;
+      type: 'generationStarted';
+    }
+  | {
+      progress: number;
+      requestId: RequestId;
+      type: 'generationProgressUpdated';
+    }
   | {
       metadata: Metadata;
-      nodeRun: NodeRunRef;
-      outputArtifact: ArtifactRef | null;
-      type: 'generationFinished';
+      result: NodeRunResult;
+      type: 'generationCompleted';
     }
-  | { message: string; type: 'generationFailed' }
-  | { state: GenerationState<Params, Metadata>; type: 'reset' };
+  | {
+      message: string;
+      requestId: RequestId;
+      type: 'generationFailed';
+    }
+  | {
+      metadata: Metadata;
+      params: Params;
+      type: 'resetToNodeStart';
+    };
 
-export function generationInitialState<Params extends CommonGenerationParams, Metadata>(
+export function createInitialGenerationState<Params extends CommonGenerationParams, Metadata>(
   params: Params,
   metadata: Metadata,
 ): GenerationState<Params, Metadata> {
   return {
     metadata,
     params,
-    run: idleGenerationRun(),
+    run: {
+      errorMessage: '',
+      progress: 0,
+      requestId: null,
+      result: null,
+      status: 'idle',
+    },
   };
 }
 
@@ -62,90 +87,94 @@ export function generationReducer<Params extends CommonGenerationParams, Metadat
   state: GenerationState<Params, Metadata>,
   action: GenerationAction<Params, Metadata>,
 ): GenerationState<Params, Metadata> {
-  if (action.type === 'paramsChanged') {
-    const params = { ...state.params, ...action.params };
+  switch (action.type) {
+    case 'paramsChanged':
+      return {
+        ...state,
+        params: {
+          ...state.params,
+          ...action.params,
+        },
+        run: {
+          errorMessage: '',
+          progress: 0,
+          requestId: null,
+          result: null,
+          status: 'idle',
+        },
+      };
 
-    if (action.params.seed !== undefined) {
-      params.seed = Math.trunc(action.params.seed);
-    }
+    case 'seedRandomized':
+      return {
+        ...state,
+        params: {
+          ...state.params,
+          seed: Math.floor(Math.random() * 2147483647),
+        },
+        run: {
+          errorMessage: '',
+          progress: 0,
+          requestId: null,
+          result: null,
+          status: 'idle',
+        },
+      };
 
-    if (action.params.steps !== undefined) {
-      params.steps = Math.max(1, Math.trunc(action.params.steps));
-    }
+    case 'generationStarted':
+      return {
+        ...state,
+        run: {
+          errorMessage: '',
+          progress: 0,
+          requestId: action.requestId,
+          result: null,
+          status: 'running',
+        },
+      };
 
-    return {
-      ...state,
-      params,
-      run: idleGenerationRun(),
-    };
+    case 'generationProgressUpdated':
+      if (action.requestId !== state.run.requestId) {
+        return state;
+      }
+
+      return {
+        ...state,
+        run: {
+          ...state.run,
+          progress: Math.min(1, Math.max(0, action.progress)),
+        },
+      };
+
+    case 'generationCompleted':
+      return {
+        ...state,
+        metadata: action.metadata,
+        run: {
+          errorMessage: '',
+          progress: 1,
+          requestId: null,
+          result: action.result,
+          status: 'ready',
+        },
+      };
+
+    case 'generationFailed':
+      if (action.requestId !== state.run.requestId) {
+        return state;
+      }
+
+      return {
+        ...state,
+        run: {
+          errorMessage: action.message,
+          progress: 0,
+          requestId: null,
+          result: null,
+          status: 'failed',
+        },
+      };
+
+    case 'resetToNodeStart':
+      return createInitialGenerationState(action.params, action.metadata);
   }
-
-  if (action.type === 'seedRandomized') {
-    return {
-      ...state,
-      params: {
-        ...state.params,
-        seed: Math.floor(Math.random() * 2147483647),
-      },
-      run: idleGenerationRun(),
-    };
-  }
-
-  if (action.type === 'generationStarted') {
-    return {
-      ...state,
-      run: {
-        ...idleGenerationRun(),
-        status: 'running',
-      },
-    };
-  }
-
-  if (action.type === 'generationProgressed') {
-    return {
-      ...state,
-      run: {
-        ...state.run,
-        progress: action.progress,
-      },
-    };
-  }
-
-  if (action.type === 'generationFinished') {
-    return {
-      ...state,
-      metadata: action.metadata,
-      run: {
-        errorMessage: '',
-        nodeRun: action.nodeRun,
-        outputArtifact: action.outputArtifact,
-        progress: 1,
-        status: 'ready',
-      },
-    };
-  }
-
-  if (action.type === 'generationFailed') {
-    return {
-      ...state,
-      run: {
-        ...state.run,
-        errorMessage: action.message,
-        progress: 0,
-        status: 'failed',
-      },
-    };
-  }
-
-  return action.state;
-}
-
-function idleGenerationRun(): GenerationRunState {
-  return {
-    errorMessage: '',
-    nodeRun: null,
-    outputArtifact: null,
-    progress: 0,
-    status: 'idle',
-  };
 }

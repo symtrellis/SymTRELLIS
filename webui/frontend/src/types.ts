@@ -4,7 +4,7 @@ export type Vector3 = [number, number, number];
 
 export type DagStatus = 'inactive' | 'completed' | 'current';
 
-export type ArtifactKey = string;
+export type UploadKey = string;
 
 export type NodeRunKey = string;
 
@@ -12,30 +12,73 @@ export type ActionKey = string;
 
 export type RequestId = string;
 
-export type ArtifactRef = {
-  artifactKey: ArtifactKey;
+export type SessionId = string;
+
+export type OutputRole = string;
+
+export type UploadRef = {
+  contentHash: string;
   filename: string;
-  kind: string;
-  metadata?: Record<string, unknown>;
   mimeType: string;
+  uploadKey: UploadKey;
+};
+
+export type OutputRef = {
+  filename: string;
+  metadata: Record<string, unknown>;
+  role: OutputRole;
   url: string;
 };
 
-export type NodeRunRef = {
-  artifactRefs: Record<string, ArtifactRef>;
+export type NodeRunResult = {
+  cached: boolean;
+  jsonResult: unknown;
   key: NodeRunKey;
   metadata: Record<string, unknown>;
-  operationId: string;
+  outputs: Record<OutputRole, OutputRef>;
+  sessionId: SessionId;
 };
 
-export type ActionKind = 'detect_rotation_symmetry' | 'detect_finer_symmetry' | 'export';
+export type ActionResult<JsonResult = unknown> = {
+  cached: boolean;
+  jsonResult: JsonResult;
+  key: ActionKey;
+  metadata: Record<string, unknown>;
+  outputs: Record<OutputRole, OutputRef>;
+  sessionId: SessionId;
+};
 
-export type ActionRef = {
-  actionKind: ActionKind;
-  artifactRefs: Record<string, ArtifactRef>;
+export type NodeRunRecord = {
+  ancestorRunKeys: NodeRunKey[];
+  inputUploadKeys: UploadKey[];
+  jsonResult: unknown;
+  key: NodeRunKey;
+  metadata: Record<string, unknown>;
+  modelId: string;
+  operationId: string;
+  operationVersion: string;
+  outputs: Record<OutputRole, OutputRef>;
+  params: Record<string, unknown>;
+  parentRunKeys: NodeRunKey[];
+};
+
+export type ActionRecord = {
+  jsonResult: unknown;
   key: ActionKey;
   metadata: Record<string, unknown>;
   operationId: string;
+  operationVersion: string;
+  outputs: Record<OutputRole, OutputRef>;
+  params: Record<string, unknown>;
+  sourceNodeRunKey: NodeRunKey;
+};
+
+export type RestoredSessionRef = {
+  actions: Record<NodeRunKey, ActionRecord[]>;
+  activeRunKeys: NodeRunKey[];
+  modelId: string;
+  nodeRuns: NodeRunRecord[];
+  sessionId: SessionId;
 };
 
 export type SymmetryFamily = 'axial' | 'T' | 'O' | 'I';

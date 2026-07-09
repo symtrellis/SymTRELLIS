@@ -14,15 +14,21 @@ class WindowIndex(NamedTuple):
 
     In self-attention, `q_rows` and `kv_rows` refer to the same input rows. In
     cross-attention, `q_rows` indexes `coords`, while `kv_rows` indexes
-    `ctx_coords`; only windows present on both sides are kept.
+    `ctx_coords`; only windows present on both sides are kept. The cached
+    min/max sequence lengths are Python integers for attention backends that
+    need exact varlen metadata.
     """
 
     q_rows: torch.Tensor  # [Nq_kept], query rows sorted by window
     q_lens: torch.Tensor  # int32 [W], number of query rows per kept window
     q_cu: torch.Tensor  # int32 [W + 1], cumulative starts from q_lens
+    q_min_seqlen: int  # minimum number of query rows in a kept window
+    q_max_seqlen: int  # maximum number of query rows in a kept window
     kv_rows: torch.Tensor  # [Nkv_kept], key/value rows sorted by window
     kv_lens: torch.Tensor  # int32 [W], number of key/value rows per kept window
     kv_cu: torch.Tensor  # int32 [W + 1], cumulative starts from kv_lens
+    kv_min_seqlen: int  # minimum number of key/value rows in a kept window
+    kv_max_seqlen: int  # maximum number of key/value rows in a kept window
 
 
 def build_window_index(
@@ -52,8 +58,8 @@ def build_window_index(
     Returns:
         A `WindowIndex`. `q_rows` indexes `coords`; `kv_rows` indexes
         `ctx_coords` for cross-attention and `coords` for self-attention.
-        `q_lens/q_cu` and `kv_lens/kv_cu` are ready for varlen attention
-        backends such as xformers or flash-attn.
+        `q_lens/q_cu`, `kv_lens/kv_cu`, and cached min/max sequence lengths are
+        ready for varlen attention backends such as xformers or flash-attn.
     """
     device = coords.device
 
@@ -131,13 +137,28 @@ def build_window_index(
         kv_cu[0] = 0
         kv_cu[1:] = torch.cumsum(kv_lens, dim=0)
 
+    q_min, q_max = torch.aminmax(q_lens)
+    q_min_seqlen = int(q_min.item())
+    q_max_seqlen = int(q_max.item())
+    if ctx_coords is None:
+        kv_min_seqlen = q_min_seqlen
+        kv_max_seqlen = q_max_seqlen
+    else:
+        kv_min, kv_max = torch.aminmax(kv_lens)
+        kv_min_seqlen = int(kv_min.item())
+        kv_max_seqlen = int(kv_max.item())
+
     return WindowIndex(
         q_rows=q_rows,
         q_lens=q_lens,
         q_cu=q_cu,
+        q_min_seqlen=q_min_seqlen,
+        q_max_seqlen=q_max_seqlen,
         kv_rows=kv_rows,
         kv_lens=kv_lens,
         kv_cu=kv_cu,
+        kv_min_seqlen=kv_min_seqlen,
+        kv_max_seqlen=kv_max_seqlen,
     )
 
 

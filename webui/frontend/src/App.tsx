@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useReducer, useState, type Dispatch } from 'react';
-import { artifactByRole, uploadInputImage } from './api/artifacts';
-import { submitAction, submitNodeRun } from './api/execution';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { restoreSession, submitAction, submitNodeRun } from './api/execution';
+import { uploadInputImage } from './api/storage';
 import { AppLayout } from './layout/AppLayout';
 import { NodeRouter } from './layout/NodeRouter';
 import { viewerContentForWorkflow } from './layout/viewerContent';
 import { modelOptions, modelSpecs } from './models/registry';
 import {
-  trellis2ArtifactRoles,
   trellis2GenerationDefaults,
   trellis2InitialShapeMetadata,
   trellis2InitialSparseMetadata,
@@ -14,35 +13,43 @@ import {
   trellis2ShapeMetadata,
   trellis2SparseMetadata,
   trellis2TextureMetadata,
+  type Trellis2ExportParams,
+  type Trellis2ShapeMetadata,
+  type Trellis2SparseMetadata,
+  type Trellis2SymmetryShapeParams,
+  type Trellis2SymmetrySparseStructureParams,
+  type Trellis2TextureMetadata,
+  type Trellis2TextureParams,
+  type Trellis2VanillaShapeParams,
+  type Trellis2VanillaSparseStructureParams,
 } from './models/trellis2';
-import type { Trellis2ExportParams } from './models/trellis2';
 import type { NodeInstanceId } from './models/types';
 import { ExportControls, type ExportState } from './node_panels/exportControls';
 import { ModelSelectionPanel } from './panels/ModelSelectionPanel';
 import {
-  completeWorkflowNode,
+  chosenEdgeIdsForWorkflow,
   chooseWorkflowEdge,
+  completeWorkflowNode,
+  createInitialWorkflowState,
   currentNodeCompleted,
   dagStatusForWorkflow,
   enterModelDag,
-  canGoBack,
-  createClientId,
-  createInitialWorkflowState,
   goBackWorkflowNode,
+  latestRunKeyForWorkflow,
   recordWorkflowAction,
+  restoreWorkflowSession,
   successorRoutesForWorkflow,
+  type WorkflowState,
 } from './state/workflow';
+import {
+  createInitialGenerationState,
+  generationReducer,
+} from './state/generation';
 import { readStoredTheme, writeStoredTheme } from './state/theme';
 import {
+  createInitialImageConditionState,
   imageConditionReducer,
-  initialImageConditionState,
 } from './state/imageCondition';
-import {
-  type CommonGenerationParams,
-  type GenerationAction,
-  generationReducer,
-  generationInitialState,
-} from './state/generation';
 import {
   detectionReducer,
   initialDetectionState,
@@ -51,48 +58,60 @@ import {
   initialManualSymmetryState,
   manualSymmetryReducer,
 } from './state/symmetry';
-import type { WorkflowState } from './state/workflow';
 import type {
   FinerSymmetryResult,
-  NodeRunRef,
+  NodeRunKey,
+  RequestId,
   RotationAxisCandidate,
+  SessionId,
   SymmetryTuple,
   ThemeMode,
 } from './types';
 
-const initialTrellis2VanillaSparseStructureState = generationInitialState(
-  trellis2GenerationDefaults.vanillaSparseStructure,
-  trellis2InitialSparseMetadata,
-);
-const initialTrellis2SymmetrySparseStructureState = generationInitialState(
-  trellis2GenerationDefaults.symmetrySparseStructure,
-  trellis2InitialSparseMetadata,
-);
-const initialTrellis2VanillaShapeState = generationInitialState(
-  trellis2GenerationDefaults.vanillaShape,
-  trellis2InitialShapeMetadata,
-);
-const initialTrellis2SymmetryShapeState = generationInitialState(
-  trellis2GenerationDefaults.symmetryShape,
-  trellis2InitialShapeMetadata,
-);
-const initialTrellis2TextureState = generationInitialState(
-  trellis2GenerationDefaults.texture,
-  trellis2InitialTextureMetadata,
-);
+const detectRotationOperation = 'symmetry.detect_rotation_symmetry';
+const detectFinerOperation = 'symmetry.detect_finer_symmetry';
+const exportGlbOperation = 'trellis2.export_glb';
 
-const initialExportStates: Record<NodeInstanceId, ExportState> = {
-  symmetry_shape: ExportControls.initialState,
-  texture: ExportControls.initialState,
-  vanilla_shape: ExportControls.initialState,
-};
+const initialTrellis2VanillaSparseStructureState = createInitialGenerationState<
+  Trellis2VanillaSparseStructureParams,
+  Trellis2SparseMetadata
+>(trellis2GenerationDefaults.vanillaSparseStructure, trellis2InitialSparseMetadata);
+const initialTrellis2SymmetrySparseStructureState = createInitialGenerationState<
+  Trellis2SymmetrySparseStructureParams,
+  Trellis2SparseMetadata
+>(trellis2GenerationDefaults.symmetrySparseStructure, trellis2InitialSparseMetadata);
+const initialTrellis2VanillaShapeState = createInitialGenerationState<
+  Trellis2VanillaShapeParams,
+  Trellis2ShapeMetadata
+>(trellis2GenerationDefaults.vanillaShape, trellis2InitialShapeMetadata);
+const initialTrellis2SymmetryShapeState = createInitialGenerationState<
+  Trellis2SymmetryShapeParams,
+  Trellis2ShapeMetadata
+>(trellis2GenerationDefaults.symmetryShape, trellis2InitialShapeMetadata);
+const initialTrellis2TextureState = createInitialGenerationState<
+  Trellis2TextureParams,
+  Trellis2TextureMetadata
+>(trellis2GenerationDefaults.texture, trellis2InitialTextureMetadata);
+
+function newRequestId(): RequestId {
+  return `request_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}` as RequestId;
+}
+
+function initialExportStates(): Record<NodeInstanceId, ExportState> {
+  return {
+    symmetry_shape: ExportControls.initialState,
+    texture: ExportControls.initialState,
+    vanilla_shape: ExportControls.initialState,
+  };
+}
 
 export default function App() {
+  const restoredOnce = useRef(false);
   const [theme, setTheme] = useState<ThemeMode>(readStoredTheme);
   const [workflow, setWorkflow] = useState<WorkflowState>(createInitialWorkflowState);
   const [imageConditionState, dispatchImageCondition] = useReducer(
     imageConditionReducer,
-    initialImageConditionState,
+    createInitialImageConditionState(),
   );
   const [manualSymmetryState, dispatchManualSymmetry] = useReducer(
     manualSymmetryReducer,
@@ -103,22 +122,31 @@ export default function App() {
     initialDetectionState,
   );
   const [trellis2VanillaSparseStructureState, dispatchTrellis2VanillaSparseStructure] =
-    useReducer(generationReducer, initialTrellis2VanillaSparseStructureState);
+    useReducer(
+      generationReducer<Trellis2VanillaSparseStructureParams, Trellis2SparseMetadata>,
+      initialTrellis2VanillaSparseStructureState,
+    );
   const [trellis2SymmetrySparseStructureState, dispatchTrellis2SymmetrySparseStructure] =
-    useReducer(generationReducer, initialTrellis2SymmetrySparseStructureState);
+    useReducer(
+      generationReducer<Trellis2SymmetrySparseStructureParams, Trellis2SparseMetadata>,
+      initialTrellis2SymmetrySparseStructureState,
+    );
   const [trellis2VanillaShapeState, dispatchTrellis2VanillaShape] = useReducer(
-    generationReducer,
+    generationReducer<Trellis2VanillaShapeParams, Trellis2ShapeMetadata>,
     initialTrellis2VanillaShapeState,
   );
   const [trellis2SymmetryShapeState, dispatchTrellis2SymmetryShape] = useReducer(
-    generationReducer,
+    generationReducer<Trellis2SymmetryShapeParams, Trellis2ShapeMetadata>,
     initialTrellis2SymmetryShapeState,
   );
   const [trellis2TextureState, dispatchTrellis2Texture] = useReducer(
-    generationReducer,
+    generationReducer<Trellis2TextureParams, Trellis2TextureMetadata>,
     initialTrellis2TextureState,
   );
-  const [exportStates, setExportStates] = useState<Record<NodeInstanceId, ExportState>>(initialExportStates);
+  const [exportStates, setExportStates] = useState<Record<NodeInstanceId, ExportState>>(
+    initialExportStates,
+  );
+
   const selectedModel = modelSpecs[workflow.selectedModelId];
   const currentNode = selectedModel.dag.nodes.find((node) => node.id === workflow.currentNodeId);
   const successorRoutes = useMemo(
@@ -126,10 +154,13 @@ export default function App() {
     [selectedModel, workflow],
   );
   const currentCompleted = currentNodeCompleted(workflow);
-  const currentNodeIsEntry = workflow.currentNodeId === selectedModel.dag.entryNodeId;
   const confirmedSymmetryTuple: SymmetryTuple | null =
     manualSymmetryState.proposedSymmetry ?? detectionState.proposedSymmetry;
-  const dagStatus = useMemo(() => dagStatusForWorkflow(selectedModel, workflow), [selectedModel, workflow]);
+  const dagStatus = useMemo(
+    () => dagStatusForWorkflow(selectedModel, workflow),
+    [selectedModel, workflow],
+  );
+  const chosenEdgeIds = useMemo(() => chosenEdgeIdsForWorkflow(workflow), [workflow]);
   const viewerContent = useMemo(
     () =>
       viewerContentForWorkflow({
@@ -154,6 +185,8 @@ export default function App() {
     writeStoredTheme(theme);
   }, [theme]);
 
+  // TODO(BACKEND_CONTRACT): wire WebSocket progress/log updates after backend update payloads are fixed.
+
   useEffect(() => {
     const previewUrl = imageConditionState.previewUrl;
 
@@ -164,506 +197,565 @@ export default function App() {
     };
   }, [imageConditionState.previewUrl]);
 
-  const handleEnterModelDag = () => {
-    setWorkflow((state) => enterModelDag(state, selectedModel));
-  };
+  useEffect(() => {
+    if (restoredOnce.current) {
+      return;
+    }
 
-  const handleChooseNextNode = (nodeId: string) => {
-    setWorkflow((state) => chooseWorkflowEdge(state, selectedModel, nodeId));
-  };
+    restoredOnce.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session') as SessionId | null;
+    const key = params.get('key') as NodeRunKey | null;
 
-  const handleExitModelDag = () => {
-    resetAllPanelStates();
-    setWorkflow(createInitialWorkflowState());
-  };
+    if (!sessionId) {
+      return;
+    }
 
-  const handleGoBack = () => {
-    const transition = goBackWorkflowNode(workflow);
-    resetPanelStatesForNodes(transition.resetNodeIds);
-    setWorkflow(transition.state);
+    restoreSession(sessionId, key ?? undefined).then((result) => {
+      if (result.ok && result.value.modelId === 'trellis2') {
+        const model = modelSpecs[result.value.modelId];
+        setWorkflow(restoreWorkflowSession(model, result.value));
+        // TODO(BACKEND_CONTRACT): hydrate each node panel from restored params/json_result
+        // after every operation's durable result contract is fixed.
+      }
+    });
+  }, []);
+
+  const resetAllPanelStates = () => {
+    dispatchImageCondition({ type: 'resetToNodeStart' });
+    dispatchManualSymmetry({ type: 'reset' });
+    dispatchDetection({ type: 'reset' });
+    dispatchTrellis2VanillaSparseStructure({
+      metadata: trellis2InitialSparseMetadata,
+      params: trellis2GenerationDefaults.vanillaSparseStructure,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2SymmetrySparseStructure({
+      metadata: trellis2InitialSparseMetadata,
+      params: trellis2GenerationDefaults.symmetrySparseStructure,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2VanillaShape({
+      metadata: trellis2InitialShapeMetadata,
+      params: trellis2GenerationDefaults.vanillaShape,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2SymmetryShape({
+      metadata: trellis2InitialShapeMetadata,
+      params: trellis2GenerationDefaults.symmetryShape,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2Texture({
+      metadata: trellis2InitialTextureMetadata,
+      params: trellis2GenerationDefaults.texture,
+      type: 'resetToNodeStart',
+    });
+    setExportStates(initialExportStates());
   };
 
   const resetPanelStatesForNodes = (nodeIds: NodeInstanceId[]) => {
     if (nodeIds.includes('image_condition')) {
-      dispatchImageCondition({ type: 'conditionResultCleared' });
-    }
-
-    if (nodeIds.includes('detect_adjust_symmetry')) {
-      dispatchDetection({ type: 'reset' });
+      dispatchImageCondition({ type: 'resetToNodeStart' });
     }
 
     if (nodeIds.includes('manual_symmetry')) {
       dispatchManualSymmetry({ type: 'reset' });
     }
 
+    if (nodeIds.includes('detect_adjust_symmetry')) {
+      dispatchDetection({ type: 'reset' });
+    }
+
     if (nodeIds.includes('vanilla_sparse_structure')) {
       dispatchTrellis2VanillaSparseStructure({
-        state: initialTrellis2VanillaSparseStructureState,
-        type: 'reset',
+        metadata: trellis2InitialSparseMetadata,
+        params: trellis2GenerationDefaults.vanillaSparseStructure,
+        type: 'resetToNodeStart',
       });
     }
 
     if (nodeIds.includes('symmetry_sparse_structure')) {
       dispatchTrellis2SymmetrySparseStructure({
-        state: initialTrellis2SymmetrySparseStructureState,
-        type: 'reset',
+        metadata: trellis2InitialSparseMetadata,
+        params: trellis2GenerationDefaults.symmetrySparseStructure,
+        type: 'resetToNodeStart',
       });
     }
 
     if (nodeIds.includes('vanilla_shape')) {
-      dispatchTrellis2VanillaShape({ state: initialTrellis2VanillaShapeState, type: 'reset' });
+      dispatchTrellis2VanillaShape({
+        metadata: trellis2InitialShapeMetadata,
+        params: trellis2GenerationDefaults.vanillaShape,
+        type: 'resetToNodeStart',
+      });
     }
 
     if (nodeIds.includes('symmetry_shape')) {
-      dispatchTrellis2SymmetryShape({ state: initialTrellis2SymmetryShapeState, type: 'reset' });
+      dispatchTrellis2SymmetryShape({
+        metadata: trellis2InitialShapeMetadata,
+        params: trellis2GenerationDefaults.symmetryShape,
+        type: 'resetToNodeStart',
+      });
     }
 
     if (nodeIds.includes('texture')) {
-      dispatchTrellis2Texture({ state: initialTrellis2TextureState, type: 'reset' });
+      dispatchTrellis2Texture({
+        metadata: trellis2InitialTextureMetadata,
+        params: trellis2GenerationDefaults.texture,
+        type: 'resetToNodeStart',
+      });
     }
 
     setExportStates((states) =>
-      Object.fromEntries(Object.entries(states).filter(([nodeId]) => !nodeIds.includes(nodeId))),
+      Object.fromEntries(
+        Object.entries(states).filter(([nodeId]) => !nodeIds.includes(nodeId)),
+      ),
     );
   };
 
-  const resetAllPanelStates = () => {
-    dispatchImageCondition({ type: 'reset' });
-    dispatchDetection({ type: 'reset' });
-    dispatchManualSymmetry({ type: 'reset' });
-    dispatchTrellis2VanillaSparseStructure({
-      state: initialTrellis2VanillaSparseStructureState,
-      type: 'reset',
-    });
-    dispatchTrellis2SymmetrySparseStructure({
-      state: initialTrellis2SymmetrySparseStructureState,
-      type: 'reset',
-    });
-    dispatchTrellis2VanillaShape({ state: initialTrellis2VanillaShapeState, type: 'reset' });
-    dispatchTrellis2SymmetryShape({ state: initialTrellis2SymmetryShapeState, type: 'reset' });
-    dispatchTrellis2Texture({ state: initialTrellis2TextureState, type: 'reset' });
-    setExportStates(initialExportStates);
+  const handleEnterModelDag = () => {
+    resetAllPanelStates();
+    setWorkflow((state) => enterModelDag(state, selectedModel));
   };
 
-  const handleGenerateImageCondition = async () => {
-    const node = currentNode;
-    const file = imageConditionState.previewFile;
+  const handleGoBack = () => {
+    if (workflow.currentNodeId === selectedModel.dag.entryNodeId) {
+      resetAllPanelStates();
+      setWorkflow(createInitialWorkflowState());
+      return;
+    }
 
-    if (!node || !file) {
+    const transition = goBackWorkflowNode(workflow);
+    resetPanelStatesForNodes(transition.resetNodeIds);
+    setWorkflow(transition.state);
+  };
+
+  const handleChooseNextNode = (nodeId: NodeInstanceId) => {
+    resetPanelStatesForNodes([nodeId]);
+    setWorkflow((state) => chooseWorkflowEdge(state, selectedModel, nodeId));
+  };
+
+  const handleGenerateImageCondition = () => {
+    if (!currentNode || !imageConditionState.file) {
       return;
     }
 
     dispatchImageCondition({ type: 'conditionGenerationStarted' });
+    uploadInputImage(imageConditionState.file, imageConditionState.previewName).then((uploadResult) => {
+      if (!uploadResult.ok) {
+        dispatchImageCondition({
+          message: uploadResult.message,
+          type: 'conditionGenerationFailed',
+        });
+        return;
+      }
 
-    const uploadResult = await uploadInputImage(file, imageConditionState.previewName);
-    if (!uploadResult.ok) {
-      dispatchImageCondition({ message: uploadResult.message, type: 'conditionGenerationFailed' });
-      return;
-    }
+      dispatchImageCondition({ type: 'inputUploaded', upload: uploadResult.value });
+      submitNodeRun({
+        inputUploadKeys: [uploadResult.value.uploadKey],
+        modelId: selectedModel.id,
+        operationId: currentNode.operation,
+        parentRunKeys: [],
+        // TODO(BACKEND_CONTRACT): image condition operation params are finalized with backend implementation.
+        params: {},
+        requestId: newRequestId(),
+        sessionId: workflow.sessionId,
+      }).then((runResult) => {
+        if (!runResult.ok) {
+          dispatchImageCondition({
+            message: runResult.message,
+            type: 'conditionGenerationFailed',
+          });
+          return;
+        }
 
-    const artifact = uploadResult.value.artifact;
-    dispatchImageCondition({ artifact, type: 'inputUploaded' });
-
-    const nodeRunResult = await submitNodeRun({
-      executionKind: 'node_run',
-      inputArtifactKeys: [artifact.artifactKey],
-      modelId: selectedModel.id,
-      nodeInstanceId: node.id,
-      nodeKind: node.kind,
-      operationId: node.operation,
-      parentRunKeys: [],
-      params: { inputImageKey: artifact.artifactKey },
-      requestId: createClientId(),
-      sessionId: workflow.sessionId,
-      type: 'execution.submit',
-    });
-    if (!nodeRunResult.ok) {
-      dispatchImageCondition({ message: nodeRunResult.message, type: 'conditionGenerationFailed' });
-      return;
-    }
-
-    const result = nodeRunResult.value;
-    // BACKEND_PROTOCOL_PENDING: a successful image-condition run must return
-    // artifactRefs.condition only after that artifact is persisted and its url is fetchable.
-    const conditionArtifact = result.artifactRefs.condition;
-    if (!conditionArtifact) {
-      dispatchImageCondition({
-        message: 'Image condition artifact was not returned by the backend.',
-        type: 'conditionGenerationFailed',
+        dispatchImageCondition({ run: runResult.value, type: 'conditionGenerated' });
+        setWorkflow((state) => completeWorkflowNode(state, currentNode.id, runResult.value));
       });
+    });
+  };
+
+  const handleConfirmManualSymmetry = () => {
+    if (!currentNode || !workflow.sessionId || !manualSymmetryState.proposedSymmetry) {
       return;
     }
 
-    const nodeRun = {
-      artifactRefs: result.artifactRefs,
-      key: result.key,
-      metadata: result.metadata,
-      operationId: node.operation,
-    };
-    dispatchImageCondition({
-      conditionArtifact,
-      nodeRun,
-      type: 'conditionGenerated',
-    });
-    setWorkflow((state) => completeWorkflowNode(state, node.id, nodeRun));
-  };
-
-  const handleDetectMajorAxis = async () => {
-    dispatchDetection({ type: 'majorDetectionStarted' });
-
-    const actionResult = await submitAction<RotationAxisCandidate[]>({
-      actionKind: 'detect_rotation_symmetry',
-      executionKind: 'action',
-      operationId: 'symmetry.detect_rotation_symmetry',
-      params: {},
-      requestId: createClientId(),
+    submitNodeRun({
+      inputUploadKeys: [],
+      modelId: selectedModel.id,
+      operationId: currentNode.operation,
+      parentRunKeys: workflow.activeRunKeys,
+      // TODO(BACKEND_CONTRACT): confirm symmetry param field is finalized with symmetry operation.
+      params: { symmetry: manualSymmetryState.proposedSymmetry },
+      requestId: newRequestId(),
       sessionId: workflow.sessionId,
-      sourceNodeRunKey: workflow.currentNodeRunKey ?? undefined,
-      type: 'execution.submit',
-    });
-
-    if (!actionResult.ok) {
-      dispatchDetection({ message: actionResult.message, type: 'majorDetectionFailed' });
-      return;
-    }
-
-    const action = actionResult.value;
-    setWorkflow((state) =>
-      recordWorkflowAction(state, {
-        actionKind: 'detect_rotation_symmetry',
-        artifactRefs: action.artifactRefs,
-        key: action.key,
-        metadata: action.metadata,
-        operationId: 'symmetry.detect_rotation_symmetry',
-      }),
-    );
-    dispatchDetection({
-      actionKey: action.key,
-      candidates: action.jsonResult,
-      type: 'rotationAxesLoaded',
+    }).then((result) => {
+      if (result.ok) {
+        setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+      }
     });
   };
 
-  const handleDetectFinerSymmetry = async () => {
-    dispatchDetection({ type: 'finerDetectionStarted' });
+  const handleConfirmDetectedSymmetry = () => {
+    if (!currentNode || !workflow.sessionId || !detectionState.proposedSymmetry) {
+      return;
+    }
 
-    const actionResult = await submitAction<FinerSymmetryResult>({
-      actionKind: 'detect_finer_symmetry',
-      executionKind: 'action',
-      operationId: 'symmetry.detect_finer_symmetry',
+    submitNodeRun({
+      inputUploadKeys: [],
+      modelId: selectedModel.id,
+      operationId: currentNode.operation,
+      parentRunKeys: workflow.activeRunKeys,
+      // TODO(BACKEND_CONTRACT): confirm symmetry param field is finalized with symmetry operation.
+      params: { symmetry: detectionState.proposedSymmetry },
+      requestId: newRequestId(),
+      sessionId: workflow.sessionId,
+    }).then((result) => {
+      if (result.ok) {
+        setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+      }
+    });
+  };
+
+  const handleDetectMajorAxis = () => {
+    if (!workflow.sessionId) {
+      return;
+    }
+
+    const sourceRunKey = latestRunKeyForWorkflow(workflow);
+    if (!sourceRunKey) {
+      return;
+    }
+
+    dispatchDetection({ type: 'majorDetectionStarted' });
+    submitAction<RotationAxisCandidate[]>({
+      operationId: detectRotationOperation,
+      // TODO(BACKEND_CONTRACT): rotation detection params are finalized with detection operation.
+      params: {},
+      requestId: newRequestId(),
+      sessionId: workflow.sessionId,
+      sourceNodeRunKey: sourceRunKey,
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchDetection({ message: result.message, type: 'majorDetectionFailed' });
+        return;
+      }
+
+      dispatchDetection({
+        actionKey: result.value.key,
+        candidates: result.value.jsonResult,
+        type: 'rotationAxesLoaded',
+      });
+      setWorkflow((state) =>
+        recordWorkflowAction(state, sourceRunKey, detectRotationOperation, result.value),
+      );
+    });
+  };
+
+  const handleDetectFinerSymmetry = () => {
+    if (!workflow.sessionId) {
+      return;
+    }
+
+    const sourceRunKey = latestRunKeyForWorkflow(workflow);
+    if (!sourceRunKey) {
+      return;
+    }
+
+    dispatchDetection({ type: 'finerDetectionStarted' });
+    submitAction<FinerSymmetryResult>({
+      operationId: detectFinerOperation,
+      // TODO(BACKEND_CONTRACT): finer detection params are finalized with detection operation.
       params: {
         center: detectionState.center,
         fold: detectionState.fold,
         majorAxis: detectionState.majorAxis,
       },
-      requestId: createClientId(),
+      requestId: newRequestId(),
       sessionId: workflow.sessionId,
-      sourceNodeRunKey: workflow.currentNodeRunKey ?? undefined,
-      type: 'execution.submit',
+      sourceNodeRunKey: sourceRunKey,
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchDetection({ message: result.message, type: 'finerDetectionFailed' });
+        return;
+      }
+
+      dispatchDetection({
+        actionKey: result.value.key,
+        result: result.value.jsonResult,
+        type: 'finerResultLoaded',
+      });
+      setWorkflow((state) =>
+        recordWorkflowAction(state, sourceRunKey, detectFinerOperation, result.value),
+      );
     });
-
-    if (!actionResult.ok) {
-      dispatchDetection({ message: actionResult.message, type: 'finerDetectionFailed' });
-      return;
-    }
-
-    const action = actionResult.value;
-    setWorkflow((state) =>
-      recordWorkflowAction(state, {
-        actionKind: 'detect_finer_symmetry',
-        artifactRefs: action.artifactRefs,
-        key: action.key,
-        metadata: action.metadata,
-        operationId: 'symmetry.detect_finer_symmetry',
-      }),
-    );
-    dispatchDetection({ actionKey: action.key, result: action.jsonResult, type: 'finerResultLoaded' });
   };
 
-  const handleConfirmManualSymmetry = async () => {
-    const node = currentNode;
-    const symmetry = manualSymmetryState.proposedSymmetry;
-
-    if (!node || !symmetry) {
+  const handleGenerateTrellis2VanillaSparseStructure = () => {
+    if (!currentNode || !workflow.sessionId) {
       return;
     }
 
-    const nodeRunResult = await submitNodeRun({
-      executionKind: 'node_run',
-      inputArtifactKeys: [],
+    const requestId = newRequestId();
+    dispatchTrellis2VanillaSparseStructure({ requestId, type: 'generationStarted' });
+    submitNodeRun({
+      inputUploadKeys: [],
       modelId: selectedModel.id,
-      nodeInstanceId: node.id,
-      nodeKind: node.kind,
-      operationId: node.operation,
-      parentRunKeys: workflow.currentNodeRunKey ? [workflow.currentNodeRunKey] : [],
-      params: { symmetry },
-      requestId: createClientId(),
+      operationId: currentNode.operation,
+      parentRunKeys: workflow.activeRunKeys,
+      params: trellis2VanillaSparseStructureState.params,
+      requestId,
       sessionId: workflow.sessionId,
-      type: 'execution.submit',
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchTrellis2VanillaSparseStructure({
+          message: result.message,
+          requestId,
+          type: 'generationFailed',
+        });
+        return;
+      }
+
+      dispatchTrellis2VanillaSparseStructure({
+        metadata: trellis2SparseMetadata(result.value.metadata),
+        result: result.value,
+        type: 'generationCompleted',
+      });
+      setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
     });
-
-    if (!nodeRunResult.ok) {
-      return;
-    }
-
-    const result = nodeRunResult.value;
-    setWorkflow((state) =>
-      completeWorkflowNode(state, node.id, {
-        artifactRefs: result.artifactRefs,
-        key: result.key,
-        metadata: result.metadata,
-        operationId: node.operation,
-      }),
-    );
   };
-
-  const handleConfirmDetectedSymmetry = async () => {
-    const node = currentNode;
-    const symmetry = detectionState.proposedSymmetry;
-
-    if (!node || !symmetry) {
-      return;
-    }
-
-    const nodeRunResult = await submitNodeRun({
-      executionKind: 'node_run',
-      inputArtifactKeys: [],
-      modelId: selectedModel.id,
-      nodeInstanceId: node.id,
-      nodeKind: node.kind,
-      operationId: node.operation,
-      parentRunKeys: workflow.currentNodeRunKey ? [workflow.currentNodeRunKey] : [],
-      params: { symmetry },
-      requestId: createClientId(),
-      sessionId: workflow.sessionId,
-      type: 'execution.submit',
-    });
-
-    if (!nodeRunResult.ok) {
-      return;
-    }
-
-    const result = nodeRunResult.value;
-    setWorkflow((state) =>
-      completeWorkflowNode(state, node.id, {
-        artifactRefs: result.artifactRefs,
-        key: result.key,
-        metadata: result.metadata,
-        operationId: node.operation,
-      }),
-    );
-  };
-
-  const submitGenerationNode = async <Params extends CommonGenerationParams, Metadata>(
-    dispatch: Dispatch<GenerationAction<Params, Metadata>>,
-    metadataFromResponse: (metadata: Record<string, unknown>) => Metadata,
-    params: Record<string, unknown>,
-    outputRoles: string[],
-  ) => {
-    const node = currentNode;
-
-    if (!node) {
-      return;
-    }
-
-    dispatch({ type: 'generationStarted' });
-
-    const nodeRunResult = await submitNodeRun({
-      executionKind: 'node_run',
-      inputArtifactKeys: [],
-      modelId: selectedModel.id,
-      nodeInstanceId: node.id,
-      nodeKind: node.kind,
-      operationId: node.operation,
-      parentRunKeys: workflow.currentNodeRunKey ? [workflow.currentNodeRunKey] : [],
-      params,
-      requestId: createClientId(),
-      sessionId: workflow.sessionId,
-      type: 'execution.submit',
-    });
-
-    if (!nodeRunResult.ok) {
-      dispatch({ message: nodeRunResult.message, type: 'generationFailed' });
-      return;
-    }
-
-    const result = nodeRunResult.value;
-    const nodeRun: NodeRunRef = {
-      artifactRefs: result.artifactRefs,
-      key: result.key,
-      metadata: result.metadata,
-      operationId: node.operation,
-    };
-    const outputArtifact = artifactByRole(nodeRun.artifactRefs, outputRoles);
-    dispatch({
-      metadata: metadataFromResponse(result.metadata),
-      nodeRun,
-      outputArtifact,
-      type: 'generationFinished',
-    });
-    setWorkflow((workflowState) => completeWorkflowNode(workflowState, node.id, nodeRun));
-  };
-
-  const handleGenerateTrellis2VanillaSparseStructure = () =>
-    submitGenerationNode(
-      dispatchTrellis2VanillaSparseStructure,
-      trellis2SparseMetadata,
-      trellis2VanillaSparseStructureState.params,
-      trellis2ArtifactRoles.sparseStructureMesh,
-    );
 
   const handleGenerateTrellis2SymmetrySparseStructure = () => {
-    if (!confirmedSymmetryTuple) {
-      dispatchTrellis2SymmetrySparseStructure({
-        message: 'Confirm a symmetry tuple before symmetry enforced sparse structure generation.',
-        type: 'generationFailed',
-      });
+    if (!currentNode || !workflow.sessionId || !confirmedSymmetryTuple) {
       return;
     }
 
-    return submitGenerationNode(
-      dispatchTrellis2SymmetrySparseStructure,
-      trellis2SparseMetadata,
-      {
+    const requestId = newRequestId();
+    dispatchTrellis2SymmetrySparseStructure({ requestId, type: 'generationStarted' });
+    submitNodeRun({
+      inputUploadKeys: [],
+      modelId: selectedModel.id,
+      operationId: currentNode.operation,
+      parentRunKeys: workflow.activeRunKeys,
+      params: {
         ...trellis2SymmetrySparseStructureState.params,
+        // TODO(BACKEND_CONTRACT): symmetry tuple field name is finalized with TRELLIS.2 operation.
         symmetry: confirmedSymmetryTuple,
       },
-      trellis2ArtifactRoles.sparseStructureMesh,
-    );
+      requestId,
+      sessionId: workflow.sessionId,
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchTrellis2SymmetrySparseStructure({
+          message: result.message,
+          requestId,
+          type: 'generationFailed',
+        });
+        return;
+      }
+
+      dispatchTrellis2SymmetrySparseStructure({
+        metadata: trellis2SparseMetadata(result.value.metadata),
+        result: result.value,
+        type: 'generationCompleted',
+      });
+      setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+    });
   };
 
-  const handleGenerateTrellis2VanillaShape = () =>
-    submitGenerationNode(
-      dispatchTrellis2VanillaShape,
-      trellis2ShapeMetadata,
-      trellis2VanillaShapeState.params,
-      trellis2ArtifactRoles.shapeMesh,
-    );
+  const handleGenerateTrellis2VanillaShape = () => {
+    if (!currentNode || !workflow.sessionId) {
+      return;
+    }
+
+    const requestId = newRequestId();
+    dispatchTrellis2VanillaShape({ requestId, type: 'generationStarted' });
+    submitNodeRun({
+      inputUploadKeys: [],
+      modelId: selectedModel.id,
+      operationId: currentNode.operation,
+      parentRunKeys: workflow.activeRunKeys,
+      params: trellis2VanillaShapeState.params,
+      requestId,
+      sessionId: workflow.sessionId,
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchTrellis2VanillaShape({
+          message: result.message,
+          requestId,
+          type: 'generationFailed',
+        });
+        return;
+      }
+
+      dispatchTrellis2VanillaShape({
+        metadata: trellis2ShapeMetadata(result.value.metadata),
+        result: result.value,
+        type: 'generationCompleted',
+      });
+      setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+    });
+  };
 
   const handleGenerateTrellis2SymmetryShape = () => {
-    if (!confirmedSymmetryTuple) {
-      dispatchTrellis2SymmetryShape({
-        message: 'Confirm a symmetry tuple before symmetry enforced shape generation.',
-        type: 'generationFailed',
-      });
+    if (!currentNode || !workflow.sessionId || !confirmedSymmetryTuple) {
       return;
     }
 
-    return submitGenerationNode(
-      dispatchTrellis2SymmetryShape,
-      trellis2ShapeMetadata,
-      {
+    const requestId = newRequestId();
+    dispatchTrellis2SymmetryShape({ requestId, type: 'generationStarted' });
+    submitNodeRun({
+      inputUploadKeys: [],
+      modelId: selectedModel.id,
+      operationId: currentNode.operation,
+      parentRunKeys: workflow.activeRunKeys,
+      params: {
         ...trellis2SymmetryShapeState.params,
+        // TODO(BACKEND_CONTRACT): symmetry tuple field name is finalized with TRELLIS.2 operation.
         symmetry: confirmedSymmetryTuple,
       },
-      trellis2ArtifactRoles.shapeMesh,
-    );
+      requestId,
+      sessionId: workflow.sessionId,
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchTrellis2SymmetryShape({
+          message: result.message,
+          requestId,
+          type: 'generationFailed',
+        });
+        return;
+      }
+
+      dispatchTrellis2SymmetryShape({
+        metadata: trellis2ShapeMetadata(result.value.metadata),
+        result: result.value,
+        type: 'generationCompleted',
+      });
+      setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+    });
   };
 
-  const handleGenerateTrellis2Texture = () =>
-    submitGenerationNode(
-      dispatchTrellis2Texture,
-      trellis2TextureMetadata,
-      trellis2TextureState.params,
-      trellis2ArtifactRoles.texturedMesh,
-    );
+  const handleGenerateTrellis2Texture = () => {
+    if (!currentNode || !workflow.sessionId) {
+      return;
+    }
+
+    const requestId = newRequestId();
+    dispatchTrellis2Texture({ requestId, type: 'generationStarted' });
+    submitNodeRun({
+      inputUploadKeys: [],
+      modelId: selectedModel.id,
+      operationId: currentNode.operation,
+      parentRunKeys: workflow.activeRunKeys,
+      params: trellis2TextureState.params,
+      requestId,
+      sessionId: workflow.sessionId,
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchTrellis2Texture({
+          message: result.message,
+          requestId,
+          type: 'generationFailed',
+        });
+        return;
+      }
+
+      dispatchTrellis2Texture({
+        metadata: trellis2TextureMetadata(),
+        result: result.value,
+        type: 'generationCompleted',
+      });
+      setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+    });
+  };
 
   const handleExportParamsChange = (
     nodeId: NodeInstanceId,
     params: Partial<Trellis2ExportParams>,
   ) => {
-    setExportStates((states) => ({
-      ...states,
-      [nodeId]: {
-        ...(states[nodeId] ?? ExportControls.initialState),
-        artifact: null,
-        bundleArtifact: null,
-        errorMessage: '',
-        log: '',
-        params: {
-          ...(states[nodeId] ?? ExportControls.initialState).params,
-          ...params,
+    setExportStates((states) => {
+      const state = states[nodeId] ?? ExportControls.initialState;
+
+      return {
+        ...states,
+        [nodeId]: {
+          ...state,
+          errorMessage: '',
+          log: '',
+          params: {
+            ...state.params,
+            ...params,
+          },
+          progress: 0,
+          requestId: null,
+          result: null,
+          status: 'idle',
         },
-        progress: 0,
-        status: 'idle',
-      },
-    }));
+      };
+    });
   };
 
-  const handleExportGlb = async (nodeId: NodeInstanceId) => {
-    const exportState = exportStates[nodeId] ?? ExportControls.initialState;
-    const sourceRun = workflow.nodeRunsByNode[nodeId];
-
-    if (!sourceRun) {
+  const handleExportGlb = (nodeId: NodeInstanceId) => {
+    if (!workflow.sessionId) {
       return;
     }
 
+    const sourceRunKey = workflow.nodeRunsByNode[nodeId]?.key;
+    if (!sourceRunKey) {
+      return;
+    }
+
+    const requestId = newRequestId();
+    const exportState = exportStates[nodeId] ?? ExportControls.initialState;
     setExportStates((states) => ({
       ...states,
       [nodeId]: {
         ...exportState,
-        artifact: null,
-        bundleArtifact: null,
         errorMessage: '',
-        log: 'Extracting GLB...',
+        log: 'Exporting GLB.',
         progress: 0,
+        requestId,
+        result: null,
         status: 'running',
       },
     }));
-
-    // BACKEND_PROTOCOL_PENDING: action progress/log websocket events are not wired yet.
-    // Until that contract is finalized, export progress is updated from the final response.
-    const actionResult = await submitAction({
-      actionKind: 'export',
-      executionKind: 'action',
-      operationId: 'trellis2.export_glb',
+    submitAction({
+      operationId: exportGlbOperation,
       params: exportState.params,
-      requestId: createClientId(),
+      requestId,
       sessionId: workflow.sessionId,
-      sourceNodeRunKey: sourceRun.key,
-      type: 'execution.submit',
-    });
+      sourceNodeRunKey: sourceRunKey,
+    }).then((result) => {
+      if (!result.ok) {
+        setExportStates((states) => ({
+          ...states,
+          [nodeId]: {
+            ...(states[nodeId] ?? exportState),
+            errorMessage: result.message,
+            log: '',
+            progress: 0,
+            requestId: null,
+            result: null,
+            status: 'failed',
+          },
+        }));
+        return;
+      }
 
-    if (!actionResult.ok) {
       setExportStates((states) => ({
         ...states,
         [nodeId]: {
-          ...exportState,
-          artifact: null,
-          bundleArtifact: null,
-          errorMessage: actionResult.message,
-          log: actionResult.message,
-          progress: 0,
-          status: 'failed',
+          ...(states[nodeId] ?? exportState),
+          errorMessage: '',
+          log: 'Export ready.',
+          progress: 1,
+          requestId: null,
+          result: result.value,
+          status: 'ready',
         },
       }));
-      return;
-    }
-
-    const action = actionResult.value;
-    const artifact = artifactByRole(action.artifactRefs, trellis2ArtifactRoles.exportGlb);
-    const bundleArtifact = artifactByRole(action.artifactRefs, trellis2ArtifactRoles.exportBundle);
-    setWorkflow((state) =>
-      recordWorkflowAction(state, {
-        actionKind: 'export',
-        artifactRefs: action.artifactRefs,
-        key: action.key,
-        metadata: action.metadata,
-        operationId: 'trellis2.export_glb',
-      }),
-    );
-    setExportStates((states) => ({
-      ...states,
-      [nodeId]: {
-        ...exportState,
-        artifact,
-        bundleArtifact,
-        errorMessage: '',
-        log: 'GLB extraction finished.',
-        progress: 1,
-        status: 'ready',
-      },
-    }));
+      setWorkflow((state) => recordWorkflowAction(state, sourceRunKey, exportGlbOperation, result.value));
+    });
   };
 
   const handleOverlayPicked = (overlayId: string) => {
@@ -680,21 +772,21 @@ export default function App() {
       exportStates={exportStates}
       imageConditionState={imageConditionState}
       manualSymmetryState={manualSymmetryState}
+      onChooseNextNode={handleChooseNextNode}
       onConfirmDetectedSymmetry={handleConfirmDetectedSymmetry}
       onConfirmManualSymmetry={handleConfirmManualSymmetry}
       onDetectFinerSymmetry={handleDetectFinerSymmetry}
       onDetectMajorAxis={handleDetectMajorAxis}
       onDetectionAction={dispatchDetection}
-      onChooseNextNode={handleChooseNextNode}
       onExportGlb={handleExportGlb}
       onExportParamsChange={handleExportParamsChange}
-      onGoBack={currentNodeIsEntry ? handleExitModelDag : canGoBack(workflow) ? handleGoBack : undefined}
       onGenerateImageCondition={handleGenerateImageCondition}
       onGenerateTrellis2SymmetryShape={handleGenerateTrellis2SymmetryShape}
       onGenerateTrellis2SymmetrySparseStructure={handleGenerateTrellis2SymmetrySparseStructure}
       onGenerateTrellis2Texture={handleGenerateTrellis2Texture}
       onGenerateTrellis2VanillaShape={handleGenerateTrellis2VanillaShape}
       onGenerateTrellis2VanillaSparseStructure={handleGenerateTrellis2VanillaSparseStructure}
+      onGoBack={handleGoBack}
       onImageConditionAction={dispatchImageCondition}
       onManualSymmetryAction={dispatchManualSymmetry}
       onTrellis2SymmetryShapeAction={dispatchTrellis2SymmetryShape}
@@ -720,7 +812,7 @@ export default function App() {
 
   return (
     <AppLayout
-      chosenEdgeIds={workflow.chosenEdges.map((edge) => edge.id)}
+      chosenEdgeIds={chosenEdgeIds}
       currentNodeId={workflow.currentNodeId}
       dagEdges={selectedModel.dag.edges}
       dagLayout={selectedModel.dag.layout}

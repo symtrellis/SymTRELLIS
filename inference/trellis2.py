@@ -7,7 +7,9 @@ projection guidance stay in `symtrellis.flow`.
 
 from typing import Optional, Type
 
+import numpy as np
 import torch
+from PIL import Image
 
 from symtrellis.flow import AffineFlowStep, BaseFlowPredictor, BaseInitialNoiseSampler
 
@@ -480,6 +482,48 @@ class TRELLIS2TextureLatentView:
             coords=self.coords,
             sp_class=self.sp_class,
         )
+
+
+def preprocess_image(
+    image: Image.Image,
+    rembg_model,
+    target_size: int = 512,
+    extend_scale: float = 1.05,
+) -> Image.Image:
+
+    has_alpha = False
+    if image.mode == "RGBA":
+        alpha = np.array(image)[:, :, 3]
+        if not np.all(alpha == 255):
+            has_alpha = True
+
+    # remove background
+    if has_alpha:
+        processed_image = image
+    else:
+        image = image.convert("RGB")
+        processed_image = rembg_model(image)
+
+    processed_image_np = np.array(processed_image)
+    alpha = processed_image_np[:, :, 3]
+
+    bbox = np.argwhere(alpha > 0.8 * 255)
+    bbox = np.min(bbox[:, 1]), np.min(bbox[:, 0]), np.max(bbox[:, 1]), np.max(bbox[:, 0])
+    center = float((bbox[0] + bbox[2]) / 2), float((bbox[1] + bbox[3]) / 2)
+    size = max(int(bbox[2] - bbox[0]), int(bbox[3] - bbox[1]))
+    size = int(size * extend_scale)
+    bbox = center[0] - size // 2, center[1] - size // 2, center[0] + size // 2, center[1] + size // 2
+
+    processed_image = processed_image.crop(bbox)
+    max_size = max(image.size)
+    scale = min(1, target_size / max_size)
+    if scale < 1:
+        processed_image = processed_image.resize((int(image.width * scale), int(image.height * scale)), Image.Resampling.LANCZOS)
+    processed_image = np.array(processed_image).astype(np.float32) / 255
+    processed_image = processed_image[:, :, :3] * processed_image[:, :, 3:4]
+    processed_image = Image.fromarray((processed_image * 255).astype(np.uint8))
+
+    return processed_image
 
 
 __all__ = [

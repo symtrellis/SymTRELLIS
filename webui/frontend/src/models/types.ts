@@ -48,14 +48,14 @@ export type ModelDagLayout = {
   nodes: Record<NodeInstanceId, { lane: DagLane; rank: number }>;
 };
 
-export type ViewerArtifactCandidate = {
+export type ViewerOutputCandidate = {
   material: 'neutral' | 'source';
   nodeId: NodeInstanceId;
   roles: string[];
 };
 
 export type ViewerNodeRule = {
-  artifactCandidates: ViewerArtifactCandidate[];
+  outputCandidates: ViewerOutputCandidate[];
   showConfirmedSymmetryPreview?: boolean;
 };
 

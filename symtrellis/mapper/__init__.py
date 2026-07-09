@@ -8,7 +8,9 @@ from .config import (
     neighbor_graph_latent_mapper_config,
     swin_3d_latent_mapper_config,
 )
+from .load import from_pretrained
 from .model import (
+    BaseSpatialTransformLatentMapper,
     NeighborGraphLatentMapper,
     Swin3DLatentMapper,
     build_neighbor_graph_latent_mapper,
@@ -17,6 +19,7 @@ from .model import (
 from .operator import LinearCoefficient, SymmetryProjector, concat_coeff, concat_rows
 
 __all__ = [
+    "BaseSpatialTransformLatentMapper",
     "LinearCoefficient",
     "NeighborGraphLatentMapper",
     "NeighborGraphLatentMapperConfig",
@@ -29,6 +32,7 @@ __all__ = [
     "build_swin_3d_latent_mapper",
     "concat_coeff",
     "concat_rows",
+    "from_pretrained",
     "neighbor_graph_latent_mapper_config",
     "swin_3d_latent_mapper_config",
 ]

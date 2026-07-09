@@ -23,7 +23,21 @@ from .heads import EdgeFeatureHead, LowRankMatrixCoefficientHead
 from .operator import LinearCoefficient
 
 
-class Swin3DLatentMapper(nn.Module):
+class BaseSpatialTransformLatentMapper(nn.Module):
+    """Interface for spatial-transform latent mappers."""
+
+    def forward(
+        self,
+        coords_src: torch.Tensor,
+        coords_dst: torch.Tensor,
+        O_dst2src: torch.Tensor,
+        t_dst2src: torch.Tensor,
+        s_dst2src: torch.Tensor,
+    ) -> LinearCoefficient:
+        raise NotImplementedError
+
+
+class Swin3DLatentMapper(BaseSpatialTransformLatentMapper):
     """Swin3D implementation of the Spatial-Transform Latent Mapper.
 
     Predict a sparse src-to-dst latent mapping from a spatial transform.
@@ -247,7 +261,7 @@ def edges_to_csr(
     return rowptr, col
 
 
-class NeighborGraphLatentMapper(nn.Module):
+class NeighborGraphLatentMapper(BaseSpatialTransformLatentMapper):
     """Neighbor-graph implementation of the Spatial-Transform Latent Mapper.
 
     Predict a sparse src-to-dst latent mapping from a spatial transform.
@@ -553,6 +567,7 @@ def build_neighbor_graph_latent_mapper(
 
 
 __all__ = [
+    "BaseSpatialTransformLatentMapper",
     "NeighborGraphLatentMapper",
     "Swin3DLatentMapper",
     "build_neighbor_graph_latent_mapper",

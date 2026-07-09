@@ -1,17 +1,18 @@
-import type { ArtifactRef } from '../types';
+import type { ActionResult, RequestId } from '../types';
 import type { Trellis2ExportParams } from '../models/trellis2';
-import { trellis2ExportDefaults } from '../models/trellis2';
+import { trellis2OutputRoleCandidates, trellis2ExportDefaults } from '../models/trellis2';
+import { outputByRole } from '../api/storage';
 import { NumberField } from './generationControls';
 
 export type ExportStatus = 'idle' | 'running' | 'ready' | 'failed';
 
 export type ExportState = {
-  artifact: ArtifactRef | null;
-  bundleArtifact: ArtifactRef | null;
   errorMessage: string;
   log: string;
   params: Trellis2ExportParams;
   progress: number;
+  requestId: RequestId | null;
+  result: ActionResult | null;
   status: ExportStatus;
 };
 
@@ -23,12 +24,12 @@ type ExportControlsProps = {
 };
 
 const initialExportState: ExportState = {
-  artifact: null,
-  bundleArtifact: null,
   errorMessage: '',
   log: '',
   params: trellis2ExportDefaults,
   progress: 0,
+  requestId: null,
+  result: null,
   status: 'idle',
 };
 
@@ -40,8 +41,8 @@ export function ExportControls({
 }: ExportControlsProps) {
   const running = state.status === 'running';
   const canExtract = !disabled && !running;
-  const canDownloadGlb = state.status === 'ready' && Boolean(state.artifact);
-  const canDownloadBundle = state.status === 'ready' && Boolean(state.bundleArtifact);
+  const glbOutput = outputByRole(state.result?.outputs ?? {}, trellis2OutputRoleCandidates.exportGlb);
+  const bundleOutput = outputByRole(state.result?.outputs ?? {}, trellis2OutputRoleCandidates.exportBundle);
   const progressPercent = Math.round(state.progress * 100);
 
   return (
@@ -55,6 +56,7 @@ export function ExportControls({
         step={1000}
         value={state.params.faceDecimationTarget}
       />
+
       <NumberField
         disabled={running}
         label="texture size"
@@ -62,6 +64,7 @@ export function ExportControls({
         step={1}
         value={state.params.textureSize}
       />
+
       <label className="export-checkbox-row">
         <span className="field-label">remesh</span>
         <input
@@ -71,6 +74,7 @@ export function ExportControls({
           type="checkbox"
         />
       </label>
+
       <NumberField
         disabled={running}
         label="remesh band"
@@ -78,6 +82,7 @@ export function ExportControls({
         step={0.01}
         value={state.params.remeshBand}
       />
+
       <NumberField
         disabled={running}
         label="remesh project"
@@ -97,17 +102,12 @@ export function ExportControls({
         <p>{state.log || 'Export has not started.'}</p>
       </div>
 
-      <button
-        className="button button-neutral"
-        disabled={!canExtract}
-        onClick={onExport}
-        type="button"
-      >
+      <button className="button button-neutral" disabled={!canExtract} onClick={onExport} type="button">
         Extract GLB
       </button>
 
-      {canDownloadGlb && state.artifact ? (
-        <a className="button button-primary export-download" href={state.artifact.url}>
+      {state.status === 'ready' && glbOutput ? (
+        <a className="button button-primary export-download" href={glbOutput.url}>
           Download GLB
         </a>
       ) : (
@@ -116,8 +116,8 @@ export function ExportControls({
         </button>
       )}
 
-      {canDownloadBundle && state.bundleArtifact ? (
-        <a className="button button-primary export-download" href={state.bundleArtifact.url}>
+      {state.status === 'ready' && bundleOutput ? (
+        <a className="button button-primary export-download" href={bundleOutput.url}>
           Download GLB and all latents
         </a>
       ) : (

@@ -90,7 +90,7 @@ export type Trellis2SymmetryShapeAction = GenerationAction<
 
 export type Trellis2TextureAction = GenerationAction<Trellis2TextureParams, Trellis2TextureMetadata>;
 
-export const trellis2ArtifactRoles = {
+export const trellis2OutputRoleCandidates = {
   exportBundle: ['export_bundle', 'latent_bundle', 'latents_zip', 'zip'],
   exportGlb: ['glb', 'export', 'download'],
   shapeMesh: ['mesh', 'shape', 'glb', 'preview'],
@@ -327,80 +327,80 @@ export const trellis2ModelSpec: ModelSpec = {
   },
   viewer: {
     detect_adjust_symmetry: {
-      artifactCandidates: [
+      outputCandidates: [
         {
           material: 'neutral',
           nodeId: 'vanilla_shape',
-          roles: trellis2ArtifactRoles.shapeMesh,
+          roles: trellis2OutputRoleCandidates.shapeMesh,
         },
       ],
     },
     manual_symmetry: {
-      artifactCandidates: [],
+      outputCandidates: [],
     },
     symmetry_shape: {
-      artifactCandidates: [
+      outputCandidates: [
         {
           material: 'neutral',
           nodeId: 'symmetry_shape',
-          roles: trellis2ArtifactRoles.shapeMesh,
+          roles: trellis2OutputRoleCandidates.shapeMesh,
         },
         {
           material: 'neutral',
           nodeId: 'symmetry_sparse_structure',
-          roles: trellis2ArtifactRoles.sparseStructureMesh,
+          roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
       ],
     },
     symmetry_sparse_structure: {
-      artifactCandidates: [
+      outputCandidates: [
         {
           material: 'neutral',
           nodeId: 'symmetry_sparse_structure',
-          roles: trellis2ArtifactRoles.sparseStructureMesh,
+          roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
       ],
       showConfirmedSymmetryPreview: true,
     },
     texture: {
-      artifactCandidates: [
+      outputCandidates: [
         {
           material: 'source',
           nodeId: 'texture',
-          roles: trellis2ArtifactRoles.texturedMesh,
+          roles: trellis2OutputRoleCandidates.texturedMesh,
         },
         {
           material: 'neutral',
           nodeId: 'symmetry_shape',
-          roles: trellis2ArtifactRoles.shapeMesh,
+          roles: trellis2OutputRoleCandidates.shapeMesh,
         },
         {
           material: 'neutral',
           nodeId: 'vanilla_shape',
-          roles: trellis2ArtifactRoles.shapeMesh,
+          roles: trellis2OutputRoleCandidates.shapeMesh,
         },
       ],
     },
     vanilla_shape: {
-      artifactCandidates: [
+      outputCandidates: [
         {
           material: 'neutral',
           nodeId: 'vanilla_shape',
-          roles: trellis2ArtifactRoles.shapeMesh,
+          roles: trellis2OutputRoleCandidates.shapeMesh,
         },
         {
           material: 'neutral',
           nodeId: 'vanilla_sparse_structure',
-          roles: trellis2ArtifactRoles.sparseStructureMesh,
+          roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
       ],
     },
     vanilla_sparse_structure: {
-      artifactCandidates: [
+      outputCandidates: [
         {
           material: 'neutral',
           nodeId: 'vanilla_sparse_structure',
-          roles: trellis2ArtifactRoles.sparseStructureMesh,
+          roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
       ],
     },
