@@ -16,6 +16,12 @@ export type GlbContentManager = {
 
 export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
   const loader = new GLTFLoader();
+  const gltfYUpToViewerZUp = new THREE.Matrix4().set(
+    1, 0, 0, 0,
+    0, 0, -1, 0,
+    0, 1, 0, 0,
+    0, 0, 0, 1,
+  );
   let activeContent: ViewerGlbContent | null = null;
   let model: THREE.Object3D | null = null;
   let mounted = true;
@@ -67,6 +73,7 @@ export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
         }
 
         model = gltf.scene;
+        model.applyMatrix4(gltfYUpToViewerZUp);
         normalizeObjectToCanonicalBox(model);
         if (content.material === 'neutral') {
           applyViewerMaterial(model, colors.mesh);

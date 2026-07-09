@@ -93,7 +93,7 @@ export type Trellis2TextureAction = GenerationAction<Trellis2TextureParams, Trel
 export const trellis2OutputRoleCandidates = {
   exportBundle: ['export_bundle', 'latent_bundle', 'latents_zip', 'zip'],
   exportGlb: ['glb', 'export', 'download'],
-  shapeMesh: ['mesh', 'shape', 'glb', 'preview'],
+  shapeMesh: ['shape_visualization_mesh', 'mesh', 'shape', 'glb', 'preview'],
   sparseStructureMesh: ['occ_visualization_mesh', 'occ', 'occupancy', 'glb', 'preview'],
   texturedMesh: ['texture', 'textured_mesh', 'mesh', 'glb'],
 };

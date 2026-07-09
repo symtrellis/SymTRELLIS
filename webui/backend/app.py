@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from .coordinator import Coordinator
 from .loaders.trellis2 import TRELLIS2Loader
 from .operations.trellis2_image_condition import Trellis2ImageCondition
+from .operations.trellis2_vanilla_shape import Trellis2VanillaShape
 from .operations.trellis2_vanilla_sparse_structure import Trellis2VanillaSparseStructure
 from .storage import Storage
 
@@ -24,6 +25,7 @@ trellis2_loader = TRELLIS2Loader()
 operations: dict[str, Any] = {
     Trellis2ImageCondition.operation_id: Trellis2ImageCondition(trellis2_loader),
     Trellis2VanillaSparseStructure.operation_id: Trellis2VanillaSparseStructure(trellis2_loader),
+    Trellis2VanillaShape.operation_id: Trellis2VanillaShape(trellis2_loader),
 }
 coordinator = Coordinator(storage=storage, operations=operations)
 websockets: set[WebSocket] = set()

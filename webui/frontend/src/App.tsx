@@ -188,9 +188,11 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    const { socket } = createJsonWebSocket('/ws');
+    let socket: WebSocket | null = null;
+    let reconnectTimer = 0;
+    let stopped = false;
 
-    socket.addEventListener('message', (event) => {
+    const handleMessage = (event: MessageEvent) => {
       const update = JSON.parse(event.data) as {
         progress?: unknown;
         request_id?: unknown;
@@ -215,10 +217,35 @@ export default function App() {
       dispatchTrellis2VanillaShape(action);
       dispatchTrellis2SymmetryShape(action);
       dispatchTrellis2Texture(action);
-    });
+    };
+
+    const connect = () => {
+      const connection = createJsonWebSocket('/ws');
+      const nextSocket = connection.socket;
+      socket = nextSocket;
+
+      nextSocket.addEventListener('message', handleMessage);
+      nextSocket.addEventListener('error', () => {
+        nextSocket.close();
+      });
+      nextSocket.addEventListener('close', () => {
+        if (!stopped && reconnectTimer === 0) {
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = 0;
+            connect();
+          }, 1000);
+        }
+      });
+    };
+
+    connect();
 
     return () => {
-      socket.close();
+      stopped = true;
+      if (reconnectTimer !== 0) {
+        window.clearTimeout(reconnectTimer);
+      }
+      socket?.close();
     };
   }, []);
 

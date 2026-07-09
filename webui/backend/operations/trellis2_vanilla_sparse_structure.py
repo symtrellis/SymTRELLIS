@@ -81,9 +81,9 @@ class Trellis2VanillaSparseStructure(Operation):
 
         noise_sampler = TRELLIS2SparseStructureLatentNoiseSampler()
         noise = noise_sampler.sample(
-            batch_size=1,
-            grid_size=16,
-            feat_dim=8,
+            batch_size=condition.shape[0],
+            grid_size=ss_flow_model.resolution,
+            feat_dim=ss_flow_model.in_channels,
             seed=seed,
             device=DEVICE,
         )
@@ -135,7 +135,7 @@ class Trellis2VanillaSparseStructure(Operation):
             logits=occ_logits,
             target_resolution=32,
         )
-        occ_visualization_mesh = trellis2_occ_to_visualization_mesh(occ_32[0, 0])
+        occ_visualization_mesh = trellis2_occ_to_visualization_mesh(occ_32[0, 0], y_up=True)
 
         ss_decoder.cpu()
         sparse_structure_latent = sparse_structure_latent.cpu()

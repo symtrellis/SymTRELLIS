@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,7 +34,7 @@ class OperationResult:
     json_result: Any = None
 
 
-Emit = Callable[[Any], Awaitable[None]]
+Emit = Callable[[Any], Coroutine[Any, Any, None]]
 
 
 class Operation:

@@ -5,12 +5,21 @@ the generic `symtrellis.flow` interfaces. Generic flow logic, CFG, and symmetry
 projection guidance stay in `symtrellis.flow`.
 """
 
-from typing import Optional, Type
+import gc
+from typing import Any, Callable, Dict, Optional, Tuple, Type, cast
 
+import cumesh
+import cv2
 import numpy as np
+import nvdiffrast.torch as dr
 import torch
 import trimesh
+from flex_gemm.ops.grid_sample import grid_sample_3d
 from PIL import Image
+from trellis2.modules.sparse import SparseTensor
+from trellis2.representations.mesh import Mesh
+from trimesh.visual import TextureVisuals
+from trimesh.visual.material import PBRMaterial
 
 from symtrellis.flow import AffineFlowStep, BaseFlowPredictor, BaseInitialNoiseSampler
 
@@ -32,6 +41,12 @@ TRELLIS2_TEXTURE_LATENT_RESCALE_T = 3.0
 TRELLIS2_TEXTURE_LATENT_CFG_STRENGTH = 1.0
 TRELLIS2_TEXTURE_LATENT_CFG_INTERVAL = (0.1, 0.4)
 TRELLIS2_TEXTURE_LATENT_CFG_RESCALE = 0.0
+TRELLIS2_PBR_ATTR_LAYOUT = {
+    "base_color": slice(0, 3),
+    "metallic": slice(3, 4),
+    "roughness": slice(4, 5),
+    "alpha": slice(5, 6),
+}
 
 # Per-channel de-normalization constants for TRELLIS.2 shape and texture sparse latents.
 # Sparse-structure latents are used directly and do not use these constants.
@@ -247,7 +262,10 @@ def trellis2_sparse_structure_logits_to_coords(
     return torch.argwhere(occ)[:, [0, 2, 3, 4]].to(dtype=torch.int32)
 
 
-def trellis2_occ_to_visualization_mesh(occ: torch.Tensor) -> trimesh.Trimesh:
+def trellis2_occ_to_visualization_mesh(
+    occ: torch.Tensor,
+    y_up: bool = False,
+) -> trimesh.Trimesh:
     """Convert dense occupancy `[R, R, R]` to a blocky boundary preview mesh."""
     grid_res = occ.shape[0]
     device = occ.device
@@ -295,6 +313,17 @@ def trellis2_occ_to_visualization_mesh(occ: torch.Tensor) -> trimesh.Trimesh:
 
     corners = occupied[voxel_ids, None, :] + face_corners[face_ids]
     vertices = corners.to(torch.float32).reshape(-1, 3) / float(grid_res) - 0.5
+    if y_up:
+        z_up_to_y_up = torch.tensor(
+            [
+                [1, 0, 0],
+                [0, 0, 1],
+                [0, -1, 0],
+            ],
+            device=device,
+            dtype=vertices.dtype,
+        )
+        vertices = vertices @ z_up_to_y_up.T
 
     face_base = (
         torch.arange(
@@ -591,15 +620,338 @@ def preprocess_image(
     bbox = center[0] - size // 2, center[1] - size // 2, center[0] + size // 2, center[1] + size // 2
 
     processed_image = processed_image.crop(bbox)
-    max_size = max(image.size)
+    max_size = max(processed_image.size)
     scale = min(1, target_size / max_size)
     if scale < 1:
-        processed_image = processed_image.resize((int(image.width * scale), int(image.height * scale)), Image.Resampling.LANCZOS)
+        processed_image = processed_image.resize(
+            (
+                int(processed_image.width * scale),
+                int(processed_image.height * scale),
+            ),
+            Image.Resampling.LANCZOS,
+        )
     processed_image = np.array(processed_image).astype(np.float32) / 255
     processed_image = processed_image[:, :, :3] * processed_image[:, :, 3:4]
     processed_image = Image.fromarray((processed_image * 255).astype(np.uint8))
 
     return processed_image
+
+
+def trelli2_mesh_to_glb(
+    shape_mesh: Mesh,
+    res: int,
+    device: torch.device,
+    texture_size: Optional[int] = None,
+    pbr_voxel: Optional[SparseTensor] = None,
+    remesh: bool = True,
+    decimation_target: int = 500000,
+    remesh_band: float = 1.0,
+    remesh_project: float = 0.0,
+    report: Optional[Callable[[Dict[str, Any]], Any]] = None,
+) -> trimesh.Trimesh:
+    has_texture = pbr_voxel is not None
+    if has_texture and remesh:
+        total_steps = 13
+    elif has_texture:
+        total_steps = 15
+    elif remesh:
+        total_steps = 6
+    else:
+        total_steps = 8
+    step = 0
+
+    vertices = shape_mesh.vertices.detach().contiguous().float().to(device)
+    faces = shape_mesh.faces.detach().contiguous().int().to(device)
+
+    mesh = cumesh.CuMesh()
+    mesh.init(vertices, faces)
+
+    del vertices, faces
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    step += 1
+    if report is not None:
+        report({"progress": step / total_steps, "stage": "prepare_mesh"})
+
+    mesh.fill_holes(max_hole_perimeter=3e-2)
+
+    source_vertices, source_faces = mesh.read()
+    source_bvh = None
+    if remesh or pbr_voxel is not None:
+        source_bvh = cumesh.cuBVH(source_vertices, source_faces)
+
+    step += 1
+    if report is not None:
+        report({"progress": step / total_steps, "stage": "source_mesh"})
+
+    if remesh:
+        resolution = int(res)
+        center = torch.tensor([0.0, 0.0, 0.0], device=device)
+        scale = 1.0
+
+        remesh_vertices, remesh_faces = cumesh.remeshing.remesh_narrow_band_dc(
+            source_vertices,
+            source_faces,
+            center=center,
+            scale=(resolution + 3 * remesh_band) / resolution * scale,
+            resolution=resolution,
+            band=remesh_band,
+            project_back=remesh_project,
+            verbose=False,
+            bvh=source_bvh,
+        )
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "remesh"})
+
+        del mesh
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        mesh = cumesh.CuMesh()
+        mesh.init(remesh_vertices, remesh_faces)
+
+        del remesh_vertices, remesh_faces
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        mesh.simplify(decimation_target, verbose=False)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "simplify"})
+
+    else:
+        mesh.simplify(decimation_target * 3, verbose=False)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "simplify_rough"})
+
+        mesh.remove_duplicate_faces()
+        mesh.repair_non_manifold_edges()
+        mesh.remove_small_connected_components(1e-5)
+        mesh.fill_holes(max_hole_perimeter=3e-2)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "cleanup_1"})
+
+        mesh.simplify(decimation_target, verbose=False)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "simplify_target"})
+
+        mesh.remove_duplicate_faces()
+        mesh.repair_non_manifold_edges()
+        mesh.remove_small_connected_components(1e-5)
+        mesh.fill_holes(max_hole_perimeter=3e-2)
+
+        mesh.unify_face_orientations()
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "cleanup_2"})
+
+    material = None
+    out_uvs = None
+
+    if pbr_voxel is None:
+        mesh.compute_vertex_normals()
+        out_vertices, out_faces = mesh.read()
+        out_normals = mesh.read_vertex_normals()
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "compute_normals"})
+    else:
+        assert texture_size is not None
+        assert source_bvh is not None
+        texture_resolution = texture_size
+        pbr_voxel = pbr_voxel.to(device)
+
+        out_vertices, out_faces, out_uvs, out_vmaps = cast(
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+            mesh.uv_unwrap(
+                compute_charts_kwargs={
+                    "threshold_cone_half_angle_rad": np.radians(90.0),
+                    "refine_iterations": 0,
+                    "global_iterations": 1,
+                    "smooth_strength": 1,
+                },
+                return_vmaps=True,
+                verbose=False,
+            ),
+        )
+
+        out_vertices = out_vertices.to(device)
+        out_faces = out_faces.to(device)
+        out_uvs = out_uvs.to(device)
+        out_vmaps = out_vmaps.to(device)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "uv_unwrap"})
+
+        mesh.compute_vertex_normals()
+        out_normals = mesh.read_vertex_normals()[out_vmaps]
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "compute_normals"})
+
+        ctx = dr.RasterizeCudaContext()
+        uvs_rast = torch.cat(
+            [
+                out_uvs * 2 - 1,
+                torch.zeros_like(out_uvs[:, :1]),
+                torch.ones_like(out_uvs[:, :1]),
+            ],
+            dim=-1,
+        ).unsqueeze(0)
+
+        rast = torch.zeros(
+            (1, texture_resolution, texture_resolution, 4),
+            device=device,
+            dtype=torch.float32,
+        )
+
+        for i in range(0, out_faces.shape[0], 100000):
+            rast_chunk, _ = cast(
+                Tuple[torch.Tensor, torch.Tensor],
+                dr.rasterize(
+                    ctx,
+                    uvs_rast,
+                    out_faces[i : i + 100000],
+                    resolution=[texture_resolution, texture_resolution],
+                ),
+            )
+            mask_chunk = rast_chunk[..., 3:4] > 0
+            rast_chunk[..., 3:4] += i
+            rast = torch.where(mask_chunk, rast_chunk, rast)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "rasterize_uv"})
+
+        mask = rast[0, ..., 3] > 0
+
+        pos = cast(Tuple[torch.Tensor, torch.Tensor], dr.interpolate(out_vertices.unsqueeze(0), rast, out_faces))[0][0]
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "interpolate_positions"})
+
+        valid_pos = pos[mask]
+        _, face_id, uvw = source_bvh.unsigned_distance(valid_pos, return_uvw=True)
+        assert uvw is not None
+        source_tri_vertices = source_vertices[source_faces[face_id.long()]]
+        valid_pos = (source_tri_vertices * uvw.unsqueeze(-1)).sum(dim=1)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "project_to_source_mesh"})
+
+        attrs = torch.zeros(
+            texture_resolution,
+            texture_resolution,
+            pbr_voxel.shape[1],
+            device=device,
+        )
+
+        attrs[mask] = grid_sample_3d(
+            pbr_voxel.feats,
+            pbr_voxel.coords,
+            shape=torch.Size([*pbr_voxel.shape, *pbr_voxel.spatial_shape]),
+            grid=((valid_pos + 0.5) * res).reshape(1, -1, 3),
+            mode="trilinear",
+        )
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "sample_pbr"})
+
+        mask_np = mask.cpu().numpy()
+        mask_inv = (~mask_np).astype(np.uint8)
+
+        base_color = np.clip(
+            attrs[..., TRELLIS2_PBR_ATTR_LAYOUT["base_color"]].cpu().numpy() * 255,
+            0,
+            255,
+        ).astype(np.uint8)
+        metallic = np.clip(
+            attrs[..., TRELLIS2_PBR_ATTR_LAYOUT["metallic"]].cpu().numpy() * 255,
+            0,
+            255,
+        ).astype(np.uint8)
+        roughness = np.clip(
+            attrs[..., TRELLIS2_PBR_ATTR_LAYOUT["roughness"]].cpu().numpy() * 255,
+            0,
+            255,
+        ).astype(np.uint8)
+        alpha = np.clip(
+            attrs[..., TRELLIS2_PBR_ATTR_LAYOUT["alpha"]].cpu().numpy() * 255,
+            0,
+            255,
+        ).astype(np.uint8)
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "extract_pbr_channels"})
+
+        base_color = cv2.inpaint(base_color, mask_inv, 3, cv2.INPAINT_TELEA)
+        metallic = cv2.inpaint(metallic, mask_inv, 1, cv2.INPAINT_TELEA)[..., None]
+        roughness = cv2.inpaint(roughness, mask_inv, 1, cv2.INPAINT_TELEA)[..., None]
+        alpha = cv2.inpaint(alpha, mask_inv, 1, cv2.INPAINT_TELEA)[..., None]
+
+        material = PBRMaterial(
+            baseColorTexture=Image.fromarray(np.concatenate([base_color, alpha], axis=-1)),
+            baseColorFactor=np.array([255, 255, 255, 255], dtype=np.uint8),
+            metallicRoughnessTexture=Image.fromarray(np.concatenate([np.zeros_like(metallic), roughness, metallic], axis=-1)),
+            metallicFactor=1.0,
+            roughnessFactor=1.0,
+            alphaMode="OPAQUE",
+            doubleSided=True if not remesh else False,
+        )
+
+        step += 1
+        if report is not None:
+            report({"progress": step / total_steps, "stage": "build_material"})
+
+    z_up_to_y_up = out_vertices.new_tensor(
+        [
+            [1, 0, 0],
+            [0, 0, 1],
+            [0, -1, 0],
+        ],
+    )
+    out_vertices = out_vertices @ z_up_to_y_up.T
+    out_normals = out_normals @ z_up_to_y_up.T
+
+    vertices_np = out_vertices.cpu().numpy().copy()
+    faces_np = out_faces.cpu().numpy()
+    normals_np = out_normals.cpu().numpy().copy()
+
+    visual = None
+    if out_uvs is not None:
+        out_uvs[:, 1] = 1 - out_uvs[:, 1]
+        uvs_np = out_uvs.cpu().numpy().copy()
+        visual = TextureVisuals(uv=uvs_np, material=material)
+
+    step += 1
+    if report is not None:
+        report({"progress": step / total_steps, "stage": "finalize_mesh"})
+
+    return trimesh.Trimesh(
+        vertices=vertices_np,
+        faces=faces_np,
+        vertex_normals=normals_np,
+        process=False,
+        visual=visual,
+    )
 
 
 __all__ = [
@@ -612,6 +964,7 @@ __all__ = [
     "TRELLIS2SparseStructureLatentNoiseSampler",
     "TRELLIS2SparseStructureView",
     "trellis2_dense_grid_coords",
+    "trelli2_mesh_to_glb",
     "trellis2_occ_to_visualization_mesh",
     "trellis2_sparse_structure_latent_to_sparse_view",
     "trellis2_sparse_structure_logits_to_coords",
