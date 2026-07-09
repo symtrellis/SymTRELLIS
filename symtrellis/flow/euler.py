@@ -1,8 +1,8 @@
-from typing import Dict, List
+from typing import Dict, Iterator, List
 
 import numpy as np
 import torch
-from tqdm import trange
+from tqdm import tqdm
 
 from .base import AffineFlowStep, BaseFlowPredictor, BaseSolver
 
@@ -21,6 +21,41 @@ class EulerSolver(BaseSolver):
     """
 
     @torch.no_grad()
+    def iter_steps(
+        self,
+        noise,
+        predictor: BaseFlowPredictor,
+        steps: int,
+        predictor_args: Dict,
+        sigma_min: float = 1e-5,
+        rescale_t: float = 1.0,
+    ) -> Iterator[AffineFlowStep]:
+        """Yield every Euler state from initial noise to final sample."""
+
+        timesteps = np.linspace(0, 1, steps + 1)
+        timesteps = timesteps / (rescale_t - (rescale_t - 1) * timesteps)
+        timesteps = timesteps.tolist()
+
+        current = AffineFlowStep(
+            sigma_min=sigma_min,
+            t=timesteps[0],
+            x_t=noise,
+        )
+        yield current
+
+        for i in range(steps):
+            pred_v = predictor.predict_velocity(
+                step=current,
+                **predictor_args,
+            )
+            x_t = current.x_t + (timesteps[i + 1] - timesteps[i]) * pred_v
+            current = AffineFlowStep(
+                sigma_min=sigma_min,
+                t=timesteps[i + 1],
+                x_t=x_t,
+            )
+            yield current
+
     def sample(
         self,
         noise,
@@ -50,34 +85,21 @@ class EulerSolver(BaseSolver):
             A list of `steps + 1` states, including the initial noise state.
         """
 
-        # Build the integration grid in flow time.
-        timesteps = np.linspace(0, 1, steps + 1)
-        timesteps = timesteps / (rescale_t - (rescale_t - 1) * timesteps)
-        timesteps = timesteps.tolist()
-
-        # Store the initial endpoint so wrappers can read the same step object.
-        trajectories = [
-            AffineFlowStep(
-                sigma_min=sigma_min,
-                t=timesteps[0],
-                x_t=noise,
-            )
-        ]
-        x_t = noise
-
-        for i in trange(steps, desc=tqdm_desc, disable=not verbose):
-            pred_v = predictor.predict_velocity(
-                step=trajectories[-1],
-                **predictor_args,
-            )
-            # Explicit Euler update using the velocity predicted at current time.
-            x_t = x_t + (timesteps[i + 1] - timesteps[i]) * pred_v
-            trajectories.append(
-                AffineFlowStep(
-                    sigma_min=sigma_min,
-                    t=timesteps[i + 1],
-                    x_t=x_t,
-                )
-            )
+        step_iter = self.iter_steps(
+            noise=noise,
+            predictor=predictor,
+            steps=steps,
+            predictor_args=predictor_args,
+            sigma_min=sigma_min,
+            rescale_t=rescale_t,
+        )
+        trajectories = [next(step_iter)]
+        for step in tqdm(
+            step_iter,
+            total=steps,
+            desc=tqdm_desc,
+            disable=not verbose,
+        ):
+            trajectories.append(step)
 
         return trajectories

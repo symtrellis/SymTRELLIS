@@ -33,7 +33,6 @@ export async function postForm<ResponseBody>(
   return { ok: true, value: (await response.json()) as ResponseBody };
 }
 
-// BACKEND_PROTOCOL_PENDING: streaming event names and payloads are finalized with backend execution wiring.
 export function createJsonWebSocket(path: string) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(`${protocol}//${window.location.host}${path}`);

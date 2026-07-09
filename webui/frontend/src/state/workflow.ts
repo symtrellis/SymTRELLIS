@@ -185,6 +185,19 @@ export function completeWorkflowNode(
   };
 }
 
+export function parentRunKeysForCurrentNode(state: WorkflowState): NodeRunKey[] {
+  if (!state.currentNodeId) {
+    return [];
+  }
+
+  const nodeIndex = state.nodeHistory.findIndex((entry) => entry.nodeId === state.currentNodeId);
+  const parentHistory = nodeIndex >= 0 ? state.nodeHistory.slice(0, nodeIndex) : state.nodeHistory;
+
+  return parentHistory
+    .map((entry) => state.nodeRunsByNode[entry.nodeId]?.key)
+    .filter((key): key is NodeRunKey => Boolean(key));
+}
+
 export function recordWorkflowAction(
   state: WorkflowState,
   sourceRunKey: NodeRunKey,

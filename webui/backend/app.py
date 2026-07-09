@@ -4,22 +4,26 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
+import torch
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 
 from .coordinator import Coordinator
 from .loaders.trellis2 import TRELLIS2Loader
 from .operations.trellis2_image_condition import Trellis2ImageCondition
+from .operations.trellis2_vanilla_sparse_structure import Trellis2VanillaSparseStructure
 from .storage import Storage
 
 STORAGE_ROOT = Path(os.environ.get("SYMTRELLIS_WEBUI_STORAGE_ROOT", "/tmp/symtrellis_webui"))
 
+torch.set_grad_enabled(False)
 
 app = FastAPI(title="SymTRELLIS WebUI Backend")
 storage = Storage(STORAGE_ROOT)
 trellis2_loader = TRELLIS2Loader()
 operations: dict[str, Any] = {
     Trellis2ImageCondition.operation_id: Trellis2ImageCondition(trellis2_loader),
+    Trellis2VanillaSparseStructure.operation_id: Trellis2VanillaSparseStructure(trellis2_loader),
 }
 coordinator = Coordinator(storage=storage, operations=operations)
 websockets: set[WebSocket] = set()

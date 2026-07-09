@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { createJsonWebSocket } from './api/client';
 import { restoreSession, submitAction, submitNodeRun } from './api/execution';
 import { uploadInputImage } from './api/storage';
 import { AppLayout } from './layout/AppLayout';
@@ -36,6 +37,7 @@ import {
   enterModelDag,
   goBackWorkflowNode,
   latestRunKeyForWorkflow,
+  parentRunKeysForCurrentNode,
   recordWorkflowAction,
   restoreWorkflowSession,
   successorRoutesForWorkflow,
@@ -185,7 +187,40 @@ export default function App() {
     writeStoredTheme(theme);
   }, [theme]);
 
-  // TODO(BACKEND_CONTRACT): wire WebSocket progress/log updates after backend update payloads are fixed.
+  useEffect(() => {
+    const { socket } = createJsonWebSocket('/ws');
+
+    socket.addEventListener('message', (event) => {
+      const update = JSON.parse(event.data) as {
+        progress?: unknown;
+        request_id?: unknown;
+        type?: unknown;
+      };
+
+      if (
+        update.type !== 'progress' ||
+        typeof update.request_id !== 'string' ||
+        typeof update.progress !== 'number'
+      ) {
+        return;
+      }
+
+      const action = {
+        progress: update.progress,
+        requestId: update.request_id as RequestId,
+        type: 'generationProgressUpdated' as const,
+      };
+      dispatchTrellis2VanillaSparseStructure(action);
+      dispatchTrellis2SymmetrySparseStructure(action);
+      dispatchTrellis2VanillaShape(action);
+      dispatchTrellis2SymmetryShape(action);
+      dispatchTrellis2Texture(action);
+    });
+
+    return () => {
+      socket.close();
+    };
+  }, []);
 
   useEffect(() => {
     const previewUrl = imageConditionState.previewUrl;
@@ -384,7 +419,7 @@ export default function App() {
       inputUploadKeys: [],
       modelId: selectedModel.id,
       operationId: currentNode.operation,
-      parentRunKeys: workflow.activeRunKeys,
+      parentRunKeys: parentRunKeysForCurrentNode(workflow),
       // TODO(BACKEND_CONTRACT): confirm symmetry param field is finalized with symmetry operation.
       params: { symmetry: manualSymmetryState.proposedSymmetry },
       requestId: newRequestId(),
@@ -405,7 +440,7 @@ export default function App() {
       inputUploadKeys: [],
       modelId: selectedModel.id,
       operationId: currentNode.operation,
-      parentRunKeys: workflow.activeRunKeys,
+      parentRunKeys: parentRunKeysForCurrentNode(workflow),
       // TODO(BACKEND_CONTRACT): confirm symmetry param field is finalized with symmetry operation.
       params: { symmetry: detectionState.proposedSymmetry },
       requestId: newRequestId(),
@@ -502,7 +537,7 @@ export default function App() {
       inputUploadKeys: [],
       modelId: selectedModel.id,
       operationId: currentNode.operation,
-      parentRunKeys: workflow.activeRunKeys,
+      parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params: trellis2VanillaSparseStructureState.params,
       requestId,
       sessionId: workflow.sessionId,
@@ -536,7 +571,7 @@ export default function App() {
       inputUploadKeys: [],
       modelId: selectedModel.id,
       operationId: currentNode.operation,
-      parentRunKeys: workflow.activeRunKeys,
+      parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params: {
         ...trellis2SymmetrySparseStructureState.params,
         // TODO(BACKEND_CONTRACT): symmetry tuple field name is finalized with TRELLIS.2 operation.
@@ -574,7 +609,7 @@ export default function App() {
       inputUploadKeys: [],
       modelId: selectedModel.id,
       operationId: currentNode.operation,
-      parentRunKeys: workflow.activeRunKeys,
+      parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params: trellis2VanillaShapeState.params,
       requestId,
       sessionId: workflow.sessionId,
@@ -608,7 +643,7 @@ export default function App() {
       inputUploadKeys: [],
       modelId: selectedModel.id,
       operationId: currentNode.operation,
-      parentRunKeys: workflow.activeRunKeys,
+      parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params: {
         ...trellis2SymmetryShapeState.params,
         // TODO(BACKEND_CONTRACT): symmetry tuple field name is finalized with TRELLIS.2 operation.
@@ -646,7 +681,7 @@ export default function App() {
       inputUploadKeys: [],
       modelId: selectedModel.id,
       operationId: currentNode.operation,
-      parentRunKeys: workflow.activeRunKeys,
+      parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params: trellis2TextureState.params,
       requestId,
       sessionId: workflow.sessionId,

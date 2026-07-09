@@ -9,6 +9,7 @@ from typing import Optional, Type
 
 import numpy as np
 import torch
+import trimesh
 from PIL import Image
 
 from symtrellis.flow import AffineFlowStep, BaseFlowPredictor, BaseInitialNoiseSampler
@@ -244,6 +245,81 @@ def trellis2_sparse_structure_logits_to_coords(
     occ = torch.nn.functional.max_pool3d(occ.float(), pool_size, pool_size, 0) > 0.5
 
     return torch.argwhere(occ)[:, [0, 2, 3, 4]].to(dtype=torch.int32)
+
+
+def trellis2_occ_to_visualization_mesh(occ: torch.Tensor) -> trimesh.Trimesh:
+    """Convert dense occupancy `[R, R, R]` to a blocky boundary preview mesh."""
+    grid_res = occ.shape[0]
+    device = occ.device
+    occ = occ.bool()
+
+    occupied = torch.argwhere(occ)
+    directions = torch.tensor(
+        [
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, -1, 0],
+            [0, 0, 1],
+            [0, 0, -1],
+        ],
+        device=device,
+        dtype=torch.long,
+    )
+    face_corners = torch.tensor(
+        [
+            [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]],
+            [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]],
+            [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]],
+            [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]],
+            [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]],
+            [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],
+        ],
+        device=device,
+        dtype=torch.long,
+    )
+
+    neighbor = occupied[:, None, :] + directions[None, :, :]
+    inside = ((neighbor >= 0) & (neighbor < grid_res)).all(dim=-1)
+    clamped_neighbor = neighbor.clamp(0, grid_res - 1)
+    neighbor_occ = occ[
+        clamped_neighbor[..., 0],
+        clamped_neighbor[..., 1],
+        clamped_neighbor[..., 2],
+    ]
+    exposed = (~inside) | (~neighbor_occ)
+
+    exposed_indices = torch.argwhere(exposed)
+    voxel_ids = exposed_indices[:, 0]
+    face_ids = exposed_indices[:, 1]
+
+    corners = occupied[voxel_ids, None, :] + face_corners[face_ids]
+    vertices = corners.to(torch.float32).reshape(-1, 3) / float(grid_res) - 0.5
+
+    face_base = (
+        torch.arange(
+            exposed_indices.shape[0],
+            device=device,
+            dtype=torch.long,
+        )
+        * 4
+    )
+    faces = torch.stack(
+        [
+            torch.stack([face_base + 0, face_base + 1, face_base + 2], dim=1),
+            torch.stack([face_base + 0, face_base + 2, face_base + 3], dim=1),
+        ],
+        dim=1,
+    ).reshape(-1, 3)
+
+    mesh = trimesh.Trimesh(
+        vertices=vertices.detach().cpu().numpy().astype(np.float32),
+        faces=faces.detach().cpu().numpy().astype(np.int64),
+        process=False,
+    )
+    mesh.merge_vertices()
+    mesh.remove_unreferenced_vertices()
+    return mesh
 
 
 class TRELLIS2SparseStructureView:
@@ -536,6 +612,7 @@ __all__ = [
     "TRELLIS2SparseStructureLatentNoiseSampler",
     "TRELLIS2SparseStructureView",
     "trellis2_dense_grid_coords",
+    "trellis2_occ_to_visualization_mesh",
     "trellis2_sparse_structure_latent_to_sparse_view",
     "trellis2_sparse_structure_logits_to_coords",
     "trellis2_sparse_view_to_sparse_structure_latent",
