@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from inference.trellis2 import trelli2_mesh_to_glb
 
 from ..loaders.trellis2 import DEVICE
 from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
+from .symmetry import ConfirmDetectedSymmetry, ConfirmManualSymmetry
 from .trellis2_image_condition import IMAGE_CONDITION_512, IMAGE_CONDITION_1024, IMAGE_PNG, Trellis2ImageCondition
 from .trellis2_symmetry_shape import Trellis2SymmetryShape
 from .trellis2_symmetry_sparse_structure import Trellis2SymmetrySparseStructure
@@ -18,6 +20,7 @@ from .trellis2_vanilla_shape import SHAPE_LATENT, SHAPE_RAW_MESH, Trellis2Vanill
 from .trellis2_vanilla_sparse_structure import SPARSE_STRUCTURE_LATENT, Trellis2VanillaSparseStructure
 
 EXPORT_GLB = "glb"
+EXPORT_CONFIG = "config"
 SHAPE_OPERATION_IDS = (
     Trellis2VanillaShape.operation_id,
     Trellis2SymmetryShape.operation_id,
@@ -32,7 +35,7 @@ class Trellis2ExportGlb(Operation):
     operation_id = "trellis2.export_glb"
     execution_kind = "action"
     queue_kind = "gpu"
-    output_roles = (EXPORT_GLB,)
+    output_roles = (EXPORT_GLB, EXPORT_CONFIG)
 
     def resolve_inputs(self, coordinator: Any, request: Any) -> OperationInputs:
         source_record = coordinator.storage.read_node_run(request.source_node_run_key)
@@ -74,6 +77,22 @@ class Trellis2ExportGlb(Operation):
         if image_condition_record is None:
             raise ValueError("trellis2.export_glb requires trellis2.image_condition")
 
+        symmetry_record = None
+        if (
+            sparse_structure_record["operation_id"] == Trellis2SymmetrySparseStructure.operation_id
+            or shape_record["operation_id"] == Trellis2SymmetryShape.operation_id
+        ):
+            for run_key in reversed(shape_record["ancestor_run_keys"]):
+                run = coordinator.storage.read_node_run(run_key)
+                if run is not None and run["operation_id"] == ConfirmDetectedSymmetry.operation_id:
+                    symmetry_record = run
+                    break
+                if run is not None and run["operation_id"] == ConfirmManualSymmetry.operation_id:
+                    symmetry_record = run
+                    break
+            if symmetry_record is None:
+                raise ValueError("trellis2.export_glb requires confirmed symmetry for symmetry generation")
+
         image_png = image_condition_record["outputs"].get(IMAGE_PNG)
         if image_png is None:
             raise ValueError("trellis2.image_condition did not produce image_png")
@@ -104,6 +123,9 @@ class Trellis2ExportGlb(Operation):
             "sparse_structure": sparse_structure_record,
             "shape": shape_record,
         }
+        if symmetry_record is not None:
+            records["symmetry"] = symmetry_record
+
         paths = {
             IMAGE_PNG: Path(image_png["path"]),
             IMAGE_CONDITION_512: Path(image_condition_512["path"]),
@@ -191,9 +213,10 @@ class Trellis2ExportGlb(Operation):
             pbr_voxel = SparseTensor(
                 coords=pbr_voxel_payload["coords"].to(DEVICE),
                 feats=pbr_voxel_payload["feats"].to(DEVICE),
-            )
+        )
 
         glb_path = context.work_dir / "model.glb"
+        config_path = context.work_dir / "config.json"
 
         loop = asyncio.get_running_loop()
 
@@ -227,6 +250,76 @@ class Trellis2ExportGlb(Operation):
 
         pbr_voxel = None
         torch.cuda.empty_cache()
+
+        image_condition_record = inputs.records["image_condition"]
+        sparse_structure_record = inputs.records["sparse_structure"]
+        shape_record = inputs.records["shape"]
+        texture_record = inputs.records.get("texture")
+        symmetry_record = inputs.records.get("symmetry")
+        sparse_structure_kind = (
+            "symmetry"
+            if sparse_structure_record["operation_id"] == Trellis2SymmetrySparseStructure.operation_id
+            else "vanilla"
+        )
+        shape_kind = (
+            "symmetry"
+            if shape_record["operation_id"] == Trellis2SymmetryShape.operation_id
+            else "vanilla"
+        )
+        if symmetry_record is None:
+            symmetry_config = {"enabled": False}
+        else:
+            symmetry_config = {
+                "enabled": True,
+                "source": (
+                    "detected"
+                    if symmetry_record["operation_id"] == ConfirmDetectedSymmetry.operation_id
+                    else "manual"
+                ),
+                "tuple": symmetry_record["json_result"],
+            }
+        texture_config = (
+            {
+                "enabled": True,
+                "params": inputs.records["texture"]["params"],
+            }
+            if "texture" in inputs.records
+            else {"enabled": False}
+        )
+        config = {
+            "model": "trellis2",
+            "imageCondition": {
+                "params": image_condition_record["params"],
+            },
+            "sparseStructure": {
+                "kind": sparse_structure_kind,
+                "params": sparse_structure_record["params"],
+            },
+            "symmetry": symmetry_config,
+            "shape": {
+                "kind": shape_kind,
+                "params": shape_record["params"],
+                "result": {
+                    "shapeLatentGridSize": shape_record["metadata"].get("shapeLatentGridSize"),
+                    "oVoxelGridSize": shape_record["metadata"].get("oVoxelGridSize"),
+                    "voxelCount": shape_record["metadata"].get("voxelCount"),
+                },
+            },
+            "texture": texture_config,
+            "export": {
+                "params": {
+                    "faceDecimationTarget": face_decimation_target,
+                    "textureSize": texture_size,
+                    "remesh": remesh,
+                    "remeshBand": remesh_band,
+                    "remeshProject": remesh_project,
+                },
+            },
+        }
+        config_path.write_text(
+            json.dumps(config, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
         bundle_root = f"{context.key}_bundle"
         image_condition_key = inputs.records["image_condition"]["node_run_key"]
@@ -292,13 +385,21 @@ class Trellis2ExportGlb(Operation):
                 ],
             )
 
-        bundle.append(
-            {
-                "source": "action",
-                "key": context.key,
-                "role": EXPORT_GLB,
-                "filename": f"{bundle_root}/model.glb",
-            },
+        bundle.extend(
+            [
+                {
+                    "source": "action",
+                    "key": context.key,
+                    "role": EXPORT_GLB,
+                    "filename": f"{bundle_root}/model.glb",
+                },
+                {
+                    "source": "action",
+                    "key": context.key,
+                    "role": EXPORT_CONFIG,
+                    "filename": f"{bundle_root}/config.json",
+                },
+            ],
         )
 
         metadata = {
@@ -318,6 +419,12 @@ class Trellis2ExportGlb(Operation):
                     path=glb_path,
                     filename="model.glb",
                     metadata=metadata,
+                ),
+                OperationOutput(
+                    role=EXPORT_CONFIG,
+                    path=config_path,
+                    filename="config.json",
+                    metadata={},
                 ),
             ],
             metadata=metadata,

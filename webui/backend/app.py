@@ -20,6 +20,8 @@ from .operations.symmetry import (
 )
 from .operations.trellis2_export_glb import Trellis2ExportGlb
 from .operations.trellis2_image_condition import Trellis2ImageCondition
+from .operations.trellis2_symmetry_shape import Trellis2SymmetryShape
+from .operations.trellis2_symmetry_sparse_structure import Trellis2SymmetrySparseStructure
 from .operations.trellis2_texture import Trellis2Texture
 from .operations.trellis2_vanilla_shape import Trellis2VanillaShape
 from .operations.trellis2_vanilla_sparse_structure import Trellis2VanillaSparseStructure
@@ -35,7 +37,9 @@ trellis2_loader = TRELLIS2Loader()
 operations: dict[str, Any] = {
     Trellis2ImageCondition.operation_id: Trellis2ImageCondition(trellis2_loader),
     Trellis2VanillaSparseStructure.operation_id: Trellis2VanillaSparseStructure(trellis2_loader),
+    Trellis2SymmetrySparseStructure.operation_id: Trellis2SymmetrySparseStructure(trellis2_loader),
     Trellis2VanillaShape.operation_id: Trellis2VanillaShape(trellis2_loader),
+    Trellis2SymmetryShape.operation_id: Trellis2SymmetryShape(trellis2_loader),
     Trellis2Texture.operation_id: Trellis2Texture(trellis2_loader),
     Trellis2ExportGlb.operation_id: Trellis2ExportGlb(),
     DetectRotationSymmetry.operation_id: DetectRotationSymmetry(),

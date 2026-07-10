@@ -358,6 +358,11 @@ export const trellis2ModelSpec: ModelSpec = {
           nodeId: 'symmetry_sparse_structure',
           roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
+        {
+          material: 'neutral',
+          nodeId: 'vanilla_shape',
+          roles: trellis2OutputRoleCandidates.shapeMesh,
+        },
       ],
       showConfirmedSymmetryPreview: true,
     },

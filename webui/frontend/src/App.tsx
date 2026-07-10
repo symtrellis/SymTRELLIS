@@ -567,10 +567,8 @@ export default function App() {
     dispatchDetection({ type: 'finerDetectionStarted' });
     submitAction<FinerSymmetryDetectionResult>({
       operationId: detectFinerOperation,
-      // TODO(BACKEND_CONTRACT): finer detection params are finalized with detection operation.
       params: {
         center: detectionState.center,
-        fold: detectionState.fold,
         majorAxis: detectionState.majorAxis,
       },
       requestId: newRequestId(),
@@ -673,11 +671,7 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
-      params: {
-        ...trellis2SymmetrySparseStructureState.params,
-        // TODO(BACKEND_CONTRACT): symmetry tuple field name is finalized with TRELLIS.2 operation.
-        symmetry: confirmedSymmetryTuple,
-      },
+      params: trellis2SymmetrySparseStructureState.params,
       requestId,
       sessionId: workflow.sessionId,
     }).then((result) => {
@@ -745,11 +739,7 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
-      params: {
-        ...trellis2SymmetryShapeState.params,
-        // TODO(BACKEND_CONTRACT): symmetry tuple field name is finalized with TRELLIS.2 operation.
-        symmetry: confirmedSymmetryTuple,
-      },
+      params: trellis2SymmetryShapeState.params,
       requestId,
       sessionId: workflow.sessionId,
     }).then((result) => {

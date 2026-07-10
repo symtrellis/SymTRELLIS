@@ -18,6 +18,7 @@ from symtrellis.flow import ClassifierFreeGuidanceWrapper, EulerSolver
 from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
 from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
 from .trellis2_image_condition import IMAGE_CONDITION_512, IMAGE_CONDITION_1024, Trellis2ImageCondition
+from .trellis2_symmetry_shape import Trellis2SymmetryShape
 from .trellis2_vanilla_shape import SHAPE_LATENT, SHAPE_RAW_MESH, Trellis2VanillaShape
 
 TEXTURE_LATENT = "texture_latent"
@@ -44,7 +45,7 @@ class Trellis2Texture(Operation):
 
         shape_record = coordinator.find_lineage_node_run(
             request.parent_run_keys,
-            "trellis2.shape.symmetry",
+            Trellis2SymmetryShape.operation_id,
         )
         if shape_record is None:
             shape_record = coordinator.find_lineage_node_run(
