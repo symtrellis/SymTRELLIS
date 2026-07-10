@@ -41,6 +41,7 @@ import {
   recordWorkflowAction,
   restoreWorkflowSession,
   successorRoutesForWorkflow,
+  workflowUrl,
   type WorkflowState,
 } from './state/workflow';
 import {
@@ -111,6 +112,7 @@ function initialExportStates(): Record<NodeInstanceId, ExportState> {
 
 export default function App() {
   const restoredOnce = useRef(false);
+  const [urlSyncReady, setUrlSyncReady] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(readStoredTheme);
   const [workflow, setWorkflow] = useState<WorkflowState>(createInitialWorkflowState);
   const [imageConditionState, dispatchImageCondition] = useReducer(
@@ -158,7 +160,6 @@ export default function App() {
     [selectedModel, workflow],
   );
   const currentCompleted = currentNodeCompleted(workflow);
-  // TODO(BACKEND_CONTRACT): confirm symmetry node runs must return SymmetryTuple as json_result.
   const confirmedSymmetryTuple: SymmetryTuple | null =
     (workflow.nodeRunsByNode.detect_adjust_symmetry?.jsonResult as
       | SymmetryTuple
@@ -298,20 +299,39 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session') as SessionId | null;
     const key = params.get('key') as NodeRunKey | null;
+    const nodeId = params.get('node') as NodeInstanceId | null;
 
     if (!sessionId) {
+      if (nodeId === selectedModel.dag.entryNodeId) {
+        setWorkflow((state) => enterModelDag(state, selectedModel));
+      }
+      setUrlSyncReady(true);
       return;
     }
 
     restoreSession(sessionId, key ?? undefined).then((result) => {
       if (result.ok && result.value.modelId === 'trellis2') {
         const model = modelSpecs[result.value.modelId];
-        setWorkflow(restoreWorkflowSession(model, result.value));
+        setWorkflow(restoreWorkflowSession(model, result.value, nodeId));
         // TODO(BACKEND_CONTRACT): hydrate each node panel from restored params/json_result
         // after every operation's durable result contract is fixed.
       }
+      setUrlSyncReady(true);
     });
   }, []);
+
+  useEffect(() => {
+    if (!urlSyncReady) {
+      return;
+    }
+
+    const nextUrl = workflowUrl(workflow);
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+
+    if (nextUrl !== currentUrl) {
+      window.history.replaceState(null, '', nextUrl);
+    }
+  }, [urlSyncReady, workflow.activeRunKeys, workflow.currentNodeId, workflow.sessionId]);
 
   const resetAllPanelStates = () => {
     dispatchImageCondition({ type: 'resetToNodeStart' });
@@ -448,7 +468,6 @@ export default function App() {
         modelId: selectedModel.id,
         operationId: currentNode.operation,
         parentRunKeys: [],
-        // TODO(BACKEND_CONTRACT): image condition operation params are finalized with backend implementation.
         params: {},
         requestId: newRequestId(),
         sessionId: workflow.sessionId,
@@ -478,7 +497,6 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
-      // TODO(BACKEND_CONTRACT): confirm symmetry param field is finalized with symmetry operation.
       params: { symmetry: manualSymmetryState.proposedSymmetry },
       requestId: newRequestId(),
       sessionId: workflow.sessionId,
@@ -504,7 +522,6 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
-      // TODO(BACKEND_CONTRACT): confirm symmetry param field is finalized with symmetry operation.
       params: { symmetry: detectionState.proposedSymmetry },
       requestId: newRequestId(),
       sessionId: workflow.sessionId,
@@ -532,7 +549,6 @@ export default function App() {
     dispatchDetection({ type: 'majorDetectionStarted' });
     submitAction<RotationAxisDetectionResult[]>({
       operationId: detectRotationOperation,
-      // TODO(BACKEND_CONTRACT): rotation detection params are finalized with detection operation.
       params: {},
       requestId: newRequestId(),
       sessionId: workflow.sessionId,

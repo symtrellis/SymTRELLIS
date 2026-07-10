@@ -1,3 +1,4 @@
+import logging
 import os
 import zipfile
 from pathlib import Path
@@ -28,6 +29,7 @@ from .operations.trellis2_vanilla_sparse_structure import Trellis2VanillaSparseS
 from .storage import Storage
 
 STORAGE_ROOT = Path(os.environ.get("SYMTRELLIS_WEBUI_STORAGE_ROOT", "/tmp/symtrellis_webui"))
+logger = logging.getLogger(__name__)
 
 torch.set_grad_enabled(False)
 
@@ -113,12 +115,34 @@ async def upload(file: UploadFile) -> dict:
 
 @app.post("/node-runs")
 async def submit_node_run(payload: dict[str, Any]) -> Any:
-    return await coordinator.submit_execution(execution_request(payload, "node_run"), emit)
+    try:
+        return await coordinator.submit_execution(execution_request(payload, "node_run"), emit)
+    except Exception as error:
+        logger.exception("Node run failed")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": str(error),
+                "operation_id": payload.get("operation_id"),
+                "request_id": payload.get("request_id"),
+            },
+        ) from error
 
 
 @app.post("/actions")
 async def submit_action(payload: dict[str, Any]) -> Any:
-    return await coordinator.submit_execution(execution_request(payload, "action"), emit)
+    try:
+        return await coordinator.submit_execution(execution_request(payload, "action"), emit)
+    except Exception as error:
+        logger.exception("Action failed")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": str(error),
+                "operation_id": payload.get("operation_id"),
+                "request_id": payload.get("request_id"),
+            },
+        ) from error
 
 
 @app.get("/sessions/{session_id}")

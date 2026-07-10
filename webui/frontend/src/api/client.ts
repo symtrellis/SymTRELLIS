@@ -11,6 +11,20 @@ export async function postJson<ResponseBody>(
   });
 
   if (!response.ok) {
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      const errorBody = (await response.json()) as {
+        detail?: { message?: string } | string;
+        error?: { message?: string };
+      };
+      const detailMessage =
+        typeof errorBody.detail === 'string' ? errorBody.detail : errorBody.detail?.message;
+
+      return {
+        message: detailMessage ?? errorBody.error?.message ?? `${response.status} ${response.statusText}`,
+        ok: false,
+      };
+    }
+
     return { message: `${response.status} ${response.statusText}`, ok: false };
   }
 
@@ -27,6 +41,20 @@ export async function postForm<ResponseBody>(
   });
 
   if (!response.ok) {
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      const errorBody = (await response.json()) as {
+        detail?: { message?: string } | string;
+        error?: { message?: string };
+      };
+      const detailMessage =
+        typeof errorBody.detail === 'string' ? errorBody.detail : errorBody.detail?.message;
+
+      return {
+        message: detailMessage ?? errorBody.error?.message ?? `${response.status} ${response.statusText}`,
+        ok: false,
+      };
+    }
+
     return { message: `${response.status} ${response.statusText}`, ok: false };
   }
 

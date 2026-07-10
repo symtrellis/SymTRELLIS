@@ -275,7 +275,28 @@ export function latestRunKeyForWorkflow(state: WorkflowState): NodeRunKey | null
   return state.activeRunKeys[state.activeRunKeys.length - 1] ?? null;
 }
 
-export function restoreWorkflowSession(model: ModelSpec, restored: RestoredSessionRef): WorkflowState {
+export function workflowUrl(state: WorkflowState): string {
+  if (!state.currentNodeId) {
+    return '/';
+  }
+
+  const params = new URLSearchParams();
+  const key = latestRunKeyForWorkflow(state);
+
+  if (state.sessionId && key) {
+    params.set('session', state.sessionId);
+    params.set('key', key);
+  }
+
+  params.set('node', state.currentNodeId);
+  return `/?${params.toString()}`;
+}
+
+export function restoreWorkflowSession(
+  model: ModelSpec,
+  restored: RestoredSessionRef,
+  requestedNodeId?: NodeInstanceId | null,
+): WorkflowState {
   const nodeRunsByKey = new Map(restored.nodeRuns.map((nodeRun) => [nodeRun.key, nodeRun]));
   const nodeRunsByNode: Record<NodeInstanceId, WorkflowNodeRun> = {};
   const nodeHistory: WorkflowHistoryEntry[] = [];
@@ -299,6 +320,25 @@ export function restoreWorkflowSession(model: ModelSpec, restored: RestoredSessi
         outputs: nodeRun.outputs,
       };
       nodeHistory.push({ edgeId: edge?.id ?? null, nodeId: node.id });
+    }
+  }
+
+  const lastCompletedNodeId = nodeHistory[nodeHistory.length - 1]?.nodeId ?? null;
+  const requestedNode = requestedNodeId
+    ? model.dag.nodes.find((candidate) => candidate.id === requestedNodeId)
+    : undefined;
+
+  if (requestedNode) {
+    if (!lastCompletedNodeId && requestedNode.id === model.dag.entryNodeId) {
+      nodeHistory.push({ edgeId: null, nodeId: requestedNode.id });
+    } else if (lastCompletedNodeId && requestedNode.id !== lastCompletedNodeId) {
+      const edge = model.dag.edges.find(
+        (candidate) => candidate.source === lastCompletedNodeId && candidate.target === requestedNode.id,
+      );
+
+      if (edge) {
+        nodeHistory.push({ edgeId: edge.id, nodeId: requestedNode.id });
+      }
     }
   }
 

@@ -122,9 +122,13 @@ class Coordinator:
         if session is None:
             return None
 
-        active_run_keys = session["active_run_keys"]
-        if key is not None and key in active_run_keys:
-            active_run_keys = active_run_keys[: active_run_keys.index(key) + 1]
+        if key is None:
+            active_run_keys = session["active_run_keys"]
+        else:
+            run = self.storage.read_node_run(key)
+            if run is None:
+                return None
+            active_run_keys = [*run["ancestor_run_keys"], key]
 
         node_runs = []
         for run_key in active_run_keys:

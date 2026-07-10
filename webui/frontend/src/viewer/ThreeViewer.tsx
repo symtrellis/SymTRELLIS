@@ -603,7 +603,17 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
   return (
     <main className="three-viewer" aria-label="3D viewer" data-viewer-theme={theme} ref={hostRef}>
       <div className="viewport-readout">
-        <span>SymTRELLIS</span>
+        <span>
+          SymTRELLIS (
+          <a href="https://arxiv.org/abs/2606.04108" target="_blank" rel="noreferrer">
+            paper
+          </a>
+          |
+          <a href="https://github.com/quantaji/SymTRELLIS" target="_blank" rel="noreferrer">
+            code
+          </a>
+          )
+        </span>
         <span>{theme}</span>
       </div>
     </main>
