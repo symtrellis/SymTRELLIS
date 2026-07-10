@@ -51,6 +51,10 @@ export function actionOutputUrl(actionKey: ActionKey, role: OutputRole) {
   return `/actions/${encodeURIComponent(actionKey)}/outputs/${encodeURIComponent(role)}`;
 }
 
+export function actionBundleUrl(actionKey: ActionKey) {
+  return `/actions/${encodeURIComponent(actionKey)}/bundle`;
+}
+
 export function nodeRunOutputsWithUrls(
   nodeRunKey: NodeRunKey,
   outputs: Record<OutputRole, BackendOutputRef>,

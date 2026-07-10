@@ -17,6 +17,7 @@ from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
 from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
 
 SHAPE_LATENT = "shape_latent"
+SHAPE_RAW_MESH = "shape_raw_mesh"
 SHAPE_VISUALIZATION_MESH = "shape_visualization_mesh"
 
 
@@ -24,7 +25,7 @@ class Trellis2VanillaShape(Operation):
     operation_id = "trellis2.shape.vanilla"
     execution_kind = "node_run"
     queue_kind = "gpu"
-    output_roles = (SHAPE_LATENT, SHAPE_VISUALIZATION_MESH)
+    output_roles = (SHAPE_LATENT, SHAPE_RAW_MESH, SHAPE_VISUALIZATION_MESH)
 
     def __init__(self, loader: TRELLIS2Loader):
         self.loader = loader
@@ -214,7 +215,7 @@ class Trellis2VanillaShape(Operation):
             )
 
             flow_solver = EulerSolver()
-            shape_latent = shape_noise
+            normalized_shape_latent = shape_noise
 
             await emit({"type": "progress", "progress": 0.0})
             for step_index, step in enumerate(
@@ -230,12 +231,13 @@ class Trellis2VanillaShape(Operation):
                     rescale_t=time_step_rescale,
                 ),
             ):
-                shape_latent = step.x_t
+                normalized_shape_latent = step.x_t
                 if step_index > 0:
                     await emit({"type": "progress", "progress": float(step.t)})
 
-            shape_latent = shape_latent.replace(
-                trellis2_shape_latent_to_sparse_view(shape_latent),
+            shape_latent = SparseTensor(
+                feats=trellis2_shape_latent_to_sparse_view(normalized_shape_latent),
+                coords=normalized_shape_latent.coords,
             )
 
             shape_flow_model.cpu()
@@ -247,21 +249,40 @@ class Trellis2VanillaShape(Operation):
         shape_decoder.set_resolution(shape_grid_size)
         shape_decoder.to(DEVICE)
 
-        shape_mesh = shape_decoder(shape_latent, return_subs=False)[0]
+        shape_meshes, shape_subs = shape_decoder(shape_latent, return_subs=True)
+        shape_mesh = shape_meshes[0]
 
         shape_latent = shape_latent.cpu()
+        shape_raw_mesh_vertices = shape_mesh.vertices.cpu().contiguous()
+        shape_raw_mesh_faces = shape_mesh.faces.cpu().contiguous()
         shape_decoder.cpu()
         torch.cuda.empty_cache()
 
         shape_latent_path = context.work_dir / "shape_latent.pt"
+        shape_raw_mesh_path = context.work_dir / "shape_raw_mesh.pt"
         shape_visualization_mesh_path = context.work_dir / "shape_visualization_mesh.glb"
 
         torch.save(
             {
-                "coords": shape_latent.coords,
-                "feats": shape_latent.feats,
+                "coords": shape_latent.coords.cpu().contiguous(),
+                "feats": shape_latent.feats.cpu().contiguous(),
             },
             shape_latent_path,
+        )
+
+        torch.save(
+            {
+                "vertices": shape_raw_mesh_vertices.cpu().contiguous(),
+                "faces": shape_raw_mesh_faces.cpu().contiguous(),
+                "shape_subs": [
+                    {
+                        "coords": sub.coords.cpu().contiguous(),
+                        "feats": sub.feats.cpu().contiguous(),
+                    }
+                    for sub in shape_subs
+                ],
+            },
+            shape_raw_mesh_path,
         )
 
         loop = asyncio.get_running_loop()
@@ -302,6 +323,16 @@ class Trellis2VanillaShape(Operation):
                     role=SHAPE_LATENT,
                     path=shape_latent_path,
                     filename="shape_latent.pt",
+                    metadata={
+                        "shapeLatentGridSize": shape_latent_grid_size,
+                        "oVoxelGridSize": shape_grid_size,
+                        "voxelCount": voxel_count,
+                    },
+                ),
+                OperationOutput(
+                    role=SHAPE_RAW_MESH,
+                    path=shape_raw_mesh_path,
+                    filename="shape_raw_mesh.pt",
                     metadata={
                         "shapeLatentGridSize": shape_latent_grid_size,
                         "oVoxelGridSize": shape_grid_size,

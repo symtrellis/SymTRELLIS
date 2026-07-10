@@ -196,6 +196,7 @@ export default function App() {
       const update = JSON.parse(event.data) as {
         progress?: unknown;
         request_id?: unknown;
+        stage?: unknown;
         type?: unknown;
       };
 
@@ -207,9 +208,11 @@ export default function App() {
         return;
       }
 
+      const progress = update.progress;
+      const requestId = update.request_id as RequestId;
       const action = {
-        progress: update.progress,
-        requestId: update.request_id as RequestId,
+        progress,
+        requestId,
         type: 'generationProgressUpdated' as const,
       };
       dispatchTrellis2VanillaSparseStructure(action);
@@ -217,6 +220,24 @@ export default function App() {
       dispatchTrellis2VanillaShape(action);
       dispatchTrellis2SymmetryShape(action);
       dispatchTrellis2Texture(action);
+      setExportStates((states) =>
+        Object.fromEntries(
+          Object.entries(states).map(([nodeId, state]) => {
+            if (state.requestId !== requestId || state.status !== 'running') {
+              return [nodeId, state];
+            }
+
+            return [
+              nodeId,
+              {
+                ...state,
+                log: typeof update.stage === 'string' ? update.stage : state.log,
+                progress,
+              },
+            ];
+          }),
+        ),
+      );
     };
 
     const connect = () => {

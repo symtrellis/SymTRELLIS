@@ -91,11 +91,10 @@ export type Trellis2SymmetryShapeAction = GenerationAction<
 export type Trellis2TextureAction = GenerationAction<Trellis2TextureParams, Trellis2TextureMetadata>;
 
 export const trellis2OutputRoleCandidates = {
-  exportBundle: ['export_bundle', 'latent_bundle', 'latents_zip', 'zip'],
   exportGlb: ['glb', 'export', 'download'],
   shapeMesh: ['shape_visualization_mesh', 'mesh', 'shape', 'glb', 'preview'],
   sparseStructureMesh: ['occ_visualization_mesh', 'occ', 'occupancy', 'glb', 'preview'],
-  texturedMesh: ['texture', 'textured_mesh', 'mesh', 'glb'],
+  texturedMesh: ['full_visualization_mesh', 'texture', 'textured_mesh', 'mesh', 'glb'],
 };
 
 const cfgDuration: DurationRange = [0, 0.4];
@@ -123,7 +122,7 @@ const shapeDefaults: Trellis2ShapeParams = {
 
 export const trellis2ExportDefaults: Trellis2ExportParams = {
   faceDecimationTarget: 1000000,
-  remesh: false,
+  remesh: true,
   remeshBand: 1,
   remeshProject: 0,
   textureSize: 4096,

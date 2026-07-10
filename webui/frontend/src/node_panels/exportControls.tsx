@@ -1,7 +1,7 @@
 import type { ActionResult, RequestId } from '../types';
 import type { Trellis2ExportParams } from '../models/trellis2';
 import { trellis2OutputRoleCandidates, trellis2ExportDefaults } from '../models/trellis2';
-import { outputByRole } from '../api/storage';
+import { actionBundleUrl, outputByRole } from '../api/storage';
 import { NumberField } from './generationControls';
 
 export type ExportStatus = 'idle' | 'running' | 'ready' | 'failed';
@@ -42,7 +42,7 @@ export function ExportControls({
   const running = state.status === 'running';
   const canExtract = !disabled && !running;
   const glbOutput = outputByRole(state.result?.outputs ?? {}, trellis2OutputRoleCandidates.exportGlb);
-  const bundleOutput = outputByRole(state.result?.outputs ?? {}, trellis2OutputRoleCandidates.exportBundle);
+  const bundleUrl = state.result ? actionBundleUrl(state.result.key) : null;
   const progressPercent = Math.round(state.progress * 100);
 
   return (
@@ -116,8 +116,8 @@ export function ExportControls({
         </button>
       )}
 
-      {state.status === 'ready' && bundleOutput ? (
-        <a className="button button-primary export-download" href={bundleOutput.url}>
+      {state.status === 'ready' && bundleUrl ? (
+        <a className="button button-primary export-download" href={bundleUrl}>
           Download GLB and all latents
         </a>
       ) : (
