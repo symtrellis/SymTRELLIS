@@ -1,21 +1,18 @@
 import type { Dispatch } from 'react';
-import type { SymmetryFamily, SymmetryTuple } from '../types';
-import { formatVector, symmetryFamilies } from '../state/symmetry';
-
-type FamilyPickerAction = {
-  family: SymmetryFamily;
-  type: 'familyPicked';
-};
+import type { SymmetryTuple } from '../types';
+import { formatVector } from '../state/symmetry';
 
 type LabelPickerAction = {
   label: string;
   type: 'labelPicked';
 };
 
-type FamilyPickerProps = {
+type FamilyPickerProps<Family extends string> = {
   disabled?: boolean;
-  dispatch: Dispatch<FamilyPickerAction>;
-  value: SymmetryFamily | null;
+  displayNames?: Partial<Record<Family, string>>;
+  families: readonly Family[];
+  onChange: (family: Family) => void;
+  value: Family | null;
 };
 
 type PointGroupSelectProps = {
@@ -28,18 +25,24 @@ type ProposedSymmetryBlockProps = {
   symmetry: SymmetryTuple | null;
 };
 
-export function FamilyPicker({ disabled = false, dispatch, value }: FamilyPickerProps) {
+export function FamilyPicker<Family extends string>({
+  disabled = false,
+  displayNames,
+  families,
+  onChange,
+  value,
+}: FamilyPickerProps<Family>) {
   return (
     <div className="family-options">
-      {symmetryFamilies.map((family) => (
+      {families.map((family) => (
         <button
           className={`choice-button${value === family ? ' choice-button--selected' : ''}`}
           disabled={disabled}
           key={family}
-          onClick={() => dispatch({ family, type: 'familyPicked' })}
+          onClick={() => onChange(family)}
           type="button"
         >
-          {family}
+          {displayNames?.[family] ?? family}
         </button>
       ))}
     </div>

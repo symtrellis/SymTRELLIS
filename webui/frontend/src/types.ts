@@ -90,6 +90,49 @@ export type SymmetryTuple = {
   minorAxis: Vector3;
 };
 
+export type RotationAxisDetectionResult = {
+  axis: Vector3;
+  dbscan_label: number;
+  fold_e: number;
+  fold_i: number;
+  q: Vector3;
+  ratio: number;
+  rmse: number;
+};
+
+export type ReflectionPlaneDetectionResult = {
+  c: number;
+  dbscan_label: number;
+  fold_i_val: number;
+  n: Vector3;
+  ratio: number;
+  rmse: number;
+};
+
+export type FinerReflectionPlaneDetectionResult = ReflectionPlaneDetectionResult & {
+  c_cor: number;
+  fold_pred?: number;
+  n_cor: Vector3;
+};
+
+export type C2AxisDetectionResult = {
+  axis: Vector3;
+  axis_cor: Vector3;
+  dbscan_label: number;
+  fold_c2: number;
+  fold_i_val: number;
+  q: Vector3;
+  q_cor: Vector3;
+  ratio: number;
+  rmse: number;
+};
+
+export type FinerSymmetryDetectionResult = {
+  c2_axes_perpendicular_to_axis: C2AxisDetectionResult[];
+  reflection_planes_containing_axis: FinerReflectionPlaneDetectionResult[];
+  reflection_planes_perpendicular_to_axis: FinerReflectionPlaneDetectionResult[];
+};
+
 export type RotationAxisCandidate = {
   axis: Vector3;
   center: Vector3;
@@ -130,7 +173,7 @@ export type ReflectionPlaneCandidate = {
 };
 
 export type FinerSymmetryResult = {
-  c2Axes: C2AxisCandidate[];
+  c2AxesPerpendicularToAxis: C2AxisCandidate[];
   reflectionPlanesContainingAxis: ReflectionPlaneCandidate[];
   reflectionPlanesPerpendicularToAxis: ReflectionPlaneCandidate[];
 };
@@ -154,4 +197,5 @@ export type SymmetryOverlay =
       majorAxis: Vector3;
       normal: Vector3;
       role: ReflectionPlaneCandidate['role'];
+      shape: 'disk' | 'square';
     };

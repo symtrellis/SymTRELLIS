@@ -1,10 +1,13 @@
 import type { SymmetryFamily, SymmetryTuple, Vector3 } from '../types';
 
 export type ProposedSymmetry = SymmetryTuple;
+export type ManualSymmetryFamily = 'reflection' | SymmetryFamily;
 
 export type ManualSymmetryState = {
   center: Vector3;
-  family: SymmetryFamily;
+  confirmationError: string;
+  confirming: boolean;
+  family: ManualSymmetryFamily;
   fold: number;
   labels: string[];
   majorAxis: Vector3;
@@ -20,13 +23,20 @@ export type ManualSymmetryAction =
   | { center: Vector3; type: 'centerChanged' }
   | { axis: Vector3; type: 'majorAxisShortcutPicked' }
   | { axis: Vector3; type: 'minorAxisShortcutPicked' }
-  | { family: SymmetryFamily; type: 'familyPicked' }
+  | { family: ManualSymmetryFamily; type: 'familyPicked' }
   | { fold: number; type: 'foldChanged' }
   | { label: string; type: 'labelPicked' }
   | { type: 'proposeSymmetry' }
+  | { type: 'confirmationStarted' }
+  | { message: string; type: 'confirmationFailed' }
+  | { type: 'confirmationCompleted' }
   | { type: 'reset' };
 
-export const symmetryFamilies: SymmetryFamily[] = ['axial', 'T', 'O', 'I'];
+export const rotationSymmetryFamilies: SymmetryFamily[] = ['axial', 'T', 'O', 'I'];
+export const manualSymmetryFamilies: ManualSymmetryFamily[] = [
+  'reflection',
+  ...rotationSymmetryFamilies,
+];
 
 export const axisShortcuts: Array<{ axis: Vector3; label: string }> = [
   { axis: [1, 0, 0], label: 'X' },
@@ -38,6 +48,8 @@ export const secondaryAxisParallelThreshold = 0.98;
 
 export const initialManualSymmetryState: ManualSymmetryState = {
   center: [0, 0, 0],
+  confirmationError: '',
+  confirming: false,
   family: 'axial',
   fold: 2,
   labels: labelsForFamily('axial', 2),
@@ -48,7 +60,11 @@ export const initialManualSymmetryState: ManualSymmetryState = {
   symmetryPreview: null,
 };
 
-export function labelsForFamily(family: SymmetryFamily, fold: number) {
+export function labelsForFamily(family: ManualSymmetryFamily, fold: number) {
+  if (family === 'reflection') {
+    return ['S1'];
+  }
+
   if (family === 'T') {
     return ['T', 'Td', 'Th'];
   }
@@ -153,8 +169,20 @@ export function canProposeManualSymmetry(state: ManualSymmetryState) {
 }
 
 export function manualSymmetryInstruction(state: ManualSymmetryState): string {
+  if (state.confirming) {
+    return 'Confirming symmetry.';
+  }
+
+  if (state.confirmationError) {
+    return state.confirmationError;
+  }
+
   if (state.proposedSymmetry) {
     return 'Review the locked symmetry tuple and viewer preview, then press Confirm.';
+  }
+
+  if (state.family === 'reflection') {
+    return 'Set the mirror-plane normal and center, then visualize the specified symmetry.';
   }
 
   if (state.family === 'axial') {
@@ -170,6 +198,22 @@ export function manualSymmetryReducer(
 ): ManualSymmetryState {
   if (action.type === 'reset') {
     return initialManualSymmetryState;
+  }
+
+  if (action.type === 'confirmationStarted') {
+    return { ...state, confirmationError: '', confirming: true };
+  }
+
+  if (action.type === 'confirmationFailed') {
+    return { ...state, confirmationError: action.message, confirming: false };
+  }
+
+  if (action.type === 'confirmationCompleted') {
+    return { ...state, confirmationError: '', confirming: false };
+  }
+
+  if (state.confirmationError) {
+    state = { ...state, confirmationError: '' };
   }
 
   if (action.type === 'majorAxisChanged') {

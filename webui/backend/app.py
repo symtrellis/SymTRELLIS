@@ -11,6 +11,13 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from .coordinator import Coordinator
 from .loaders.trellis2 import TRELLIS2Loader
+from .operations.symmetry import (
+    ConfirmDetectedSymmetry,
+    ConfirmManualSymmetry,
+    DetectFinerSymmetry,
+    DetectReflectionPlanes,
+    DetectRotationSymmetry,
+)
 from .operations.trellis2_export_glb import Trellis2ExportGlb
 from .operations.trellis2_image_condition import Trellis2ImageCondition
 from .operations.trellis2_texture import Trellis2Texture
@@ -31,6 +38,11 @@ operations: dict[str, Any] = {
     Trellis2VanillaShape.operation_id: Trellis2VanillaShape(trellis2_loader),
     Trellis2Texture.operation_id: Trellis2Texture(trellis2_loader),
     Trellis2ExportGlb.operation_id: Trellis2ExportGlb(),
+    DetectRotationSymmetry.operation_id: DetectRotationSymmetry(),
+    DetectReflectionPlanes.operation_id: DetectReflectionPlanes(),
+    DetectFinerSymmetry.operation_id: DetectFinerSymmetry(),
+    ConfirmDetectedSymmetry.operation_id: ConfirmDetectedSymmetry(),
+    ConfirmManualSymmetry.operation_id: ConfirmManualSymmetry(),
 }
 coordinator = Coordinator(storage=storage, operations=operations)
 websockets: set[WebSocket] = set()

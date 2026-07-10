@@ -44,6 +44,7 @@ type NodeRouterProps = {
   onConfirmManualSymmetry: () => void;
   onDetectFinerSymmetry: () => void;
   onDetectMajorAxis: () => void;
+  onDetectReflectionPlanes: () => void;
   onDetectionAction: Dispatch<DetectionAction>;
   onExportGlb: (nodeId: NodeInstanceId) => void;
   onExportParamsChange: (nodeId: NodeInstanceId, params: Partial<Trellis2ExportParams>) => void;
@@ -82,6 +83,7 @@ export function NodeRouter({
   onConfirmManualSymmetry,
   onDetectFinerSymmetry,
   onDetectMajorAxis,
+  onDetectReflectionPlanes,
   onDetectionAction,
   onExportGlb,
   onExportParamsChange,
@@ -199,6 +201,7 @@ export function NodeRouter({
           onConfirm={onConfirmDetectedSymmetry}
           onDetectFinerSymmetry={onDetectFinerSymmetry}
           onDetectMajorAxis={onDetectMajorAxis}
+          onDetectReflectionPlanes={onDetectReflectionPlanes}
           onNext={nextActions[0]?.onClick}
           state={detectionState}
         />

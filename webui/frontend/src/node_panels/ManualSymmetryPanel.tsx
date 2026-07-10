@@ -3,6 +3,7 @@ import {
   axisShortcutDisabled,
   axisShortcuts,
   canProposeManualSymmetry,
+  manualSymmetryFamilies,
 } from '../state/symmetry';
 import type { ManualSymmetryAction, ManualSymmetryState } from '../state/symmetry';
 import { FamilyPicker, PointGroupSelect, ProposedSymmetryBlock } from './symmetryControls';
@@ -82,8 +83,13 @@ export function ManualSymmetryPanel({
         </div>
       </section>
 
-      <section className="node-section">
-        <FamilyPicker dispatch={dispatch} value={state.family} />
+      <section className="node-section manual-family-section">
+        <FamilyPicker
+          displayNames={{ reflection: 'reflect' }}
+          families={manualSymmetryFamilies}
+          onChange={(family) => dispatch({ family, type: 'familyPicked' })}
+          value={state.family}
+        />
 
         {state.family === 'axial' ? (
           <IntegerStepperField
@@ -96,7 +102,14 @@ export function ManualSymmetryPanel({
       </section>
 
       <section className="node-section">
-        <PointGroupSelect dispatch={dispatch} labels={state.labels} value={state.selectedLabel} />
+        {state.family === 'reflection' ? (
+          <div className="select-row">
+            <span className="field-label">Point group type</span>
+            <output className="point-group-value">S1</output>
+          </div>
+        ) : (
+          <PointGroupSelect dispatch={dispatch} labels={state.labels} value={state.selectedLabel} />
+        )}
       </section>
 
       <button
@@ -112,11 +125,11 @@ export function ManualSymmetryPanel({
 
       <button
         className="button button-primary"
-        disabled={!state.proposedSymmetry || nodeReady}
+        disabled={!state.proposedSymmetry || nodeReady || state.confirming}
         onClick={onConfirm}
         type="button"
       >
-        Confirm
+        {state.confirming ? 'Confirming' : 'Confirm'}
       </button>
 
       {onNext ? (

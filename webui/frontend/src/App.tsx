@@ -61,10 +61,11 @@ import {
   manualSymmetryReducer,
 } from './state/symmetry';
 import type {
-  FinerSymmetryResult,
+  FinerSymmetryDetectionResult,
   NodeRunKey,
+  ReflectionPlaneDetectionResult,
   RequestId,
-  RotationAxisCandidate,
+  RotationAxisDetectionResult,
   SessionId,
   SymmetryTuple,
   ThemeMode,
@@ -72,6 +73,7 @@ import type {
 
 const detectRotationOperation = 'symmetry.detect_rotation_symmetry';
 const detectFinerOperation = 'symmetry.detect_finer_symmetry';
+const detectReflectionOperation = 'symmetry.detect_reflection_planes';
 const exportGlbOperation = 'trellis2.export_glb';
 
 const initialTrellis2VanillaSparseStructureState = createInitialGenerationState<
@@ -156,8 +158,15 @@ export default function App() {
     [selectedModel, workflow],
   );
   const currentCompleted = currentNodeCompleted(workflow);
+  // TODO(BACKEND_CONTRACT): confirm symmetry node runs must return SymmetryTuple as json_result.
   const confirmedSymmetryTuple: SymmetryTuple | null =
-    manualSymmetryState.proposedSymmetry ?? detectionState.proposedSymmetry;
+    (workflow.nodeRunsByNode.detect_adjust_symmetry?.jsonResult as
+      | SymmetryTuple
+      | null
+      | undefined) ??
+    (workflow.nodeRunsByNode.manual_symmetry?.jsonResult as SymmetryTuple | null | undefined) ??
+    detectionState.proposedSymmetry ??
+    manualSymmetryState.proposedSymmetry;
   const dagStatus = useMemo(
     () => dagStatusForWorkflow(selectedModel, workflow),
     [selectedModel, workflow],
@@ -463,6 +472,7 @@ export default function App() {
       return;
     }
 
+    dispatchManualSymmetry({ type: 'confirmationStarted' });
     submitNodeRun({
       inputUploadKeys: [],
       modelId: selectedModel.id,
@@ -473,9 +483,13 @@ export default function App() {
       requestId: newRequestId(),
       sessionId: workflow.sessionId,
     }).then((result) => {
-      if (result.ok) {
-        setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+      if (!result.ok) {
+        dispatchManualSymmetry({ message: result.message, type: 'confirmationFailed' });
+        return;
       }
+
+      dispatchManualSymmetry({ type: 'confirmationCompleted' });
+      setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
     });
   };
 
@@ -484,6 +498,7 @@ export default function App() {
       return;
     }
 
+    dispatchDetection({ type: 'confirmationStarted' });
     submitNodeRun({
       inputUploadKeys: [],
       modelId: selectedModel.id,
@@ -494,9 +509,13 @@ export default function App() {
       requestId: newRequestId(),
       sessionId: workflow.sessionId,
     }).then((result) => {
-      if (result.ok) {
-        setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
+      if (!result.ok) {
+        dispatchDetection({ message: result.message, type: 'confirmationFailed' });
+        return;
       }
+
+      dispatchDetection({ type: 'confirmationCompleted' });
+      setWorkflow((state) => completeWorkflowNode(state, currentNode.id, result.value));
     });
   };
 
@@ -511,7 +530,7 @@ export default function App() {
     }
 
     dispatchDetection({ type: 'majorDetectionStarted' });
-    submitAction<RotationAxisCandidate[]>({
+    submitAction<RotationAxisDetectionResult[]>({
       operationId: detectRotationOperation,
       // TODO(BACKEND_CONTRACT): rotation detection params are finalized with detection operation.
       params: {},
@@ -546,7 +565,7 @@ export default function App() {
     }
 
     dispatchDetection({ type: 'finerDetectionStarted' });
-    submitAction<FinerSymmetryResult>({
+    submitAction<FinerSymmetryDetectionResult>({
       operationId: detectFinerOperation,
       // TODO(BACKEND_CONTRACT): finer detection params are finalized with detection operation.
       params: {
@@ -570,6 +589,40 @@ export default function App() {
       });
       setWorkflow((state) =>
         recordWorkflowAction(state, sourceRunKey, detectFinerOperation, result.value),
+      );
+    });
+  };
+
+  const handleDetectReflectionPlanes = () => {
+    if (!workflow.sessionId) {
+      return;
+    }
+
+    const sourceRunKey = latestRunKeyForWorkflow(workflow);
+    if (!sourceRunKey) {
+      return;
+    }
+
+    dispatchDetection({ type: 'reflectionDetectionStarted' });
+    submitAction<ReflectionPlaneDetectionResult[]>({
+      operationId: detectReflectionOperation,
+      params: {},
+      requestId: newRequestId(),
+      sessionId: workflow.sessionId,
+      sourceNodeRunKey: sourceRunKey,
+    }).then((result) => {
+      if (!result.ok) {
+        dispatchDetection({ message: result.message, type: 'reflectionDetectionFailed' });
+        return;
+      }
+
+      dispatchDetection({
+        actionKey: result.value.key,
+        candidates: result.value.jsonResult,
+        type: 'reflectionPlanesLoaded',
+      });
+      setWorkflow((state) =>
+        recordWorkflowAction(state, sourceRunKey, detectReflectionOperation, result.value),
       );
     });
   };
@@ -860,6 +913,7 @@ export default function App() {
       onConfirmManualSymmetry={handleConfirmManualSymmetry}
       onDetectFinerSymmetry={handleDetectFinerSymmetry}
       onDetectMajorAxis={handleDetectMajorAxis}
+      onDetectReflectionPlanes={handleDetectReflectionPlanes}
       onDetectionAction={dispatchDetection}
       onExportGlb={handleExportGlb}
       onExportParamsChange={handleExportParamsChange}

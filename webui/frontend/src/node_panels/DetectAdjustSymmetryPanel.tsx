@@ -1,6 +1,7 @@
 import type { Dispatch } from 'react';
 import { canProposeSymmetry } from '../state/detection';
 import type { DetectionAction, DetectionState } from '../state/detection';
+import { rotationSymmetryFamilies } from '../state/symmetry';
 import { FamilyPicker, PointGroupSelect, ProposedSymmetryBlock } from './symmetryControls';
 import { IntegerStepperField, VectorField } from './controls';
 
@@ -10,6 +11,7 @@ type DetectAdjustSymmetryPanelProps = {
   onConfirm: () => void;
   onDetectFinerSymmetry: () => void;
   onDetectMajorAxis: () => void;
+  onDetectReflectionPlanes: () => void;
   onNext?: () => void;
   state: DetectionState;
 };
@@ -20,12 +22,15 @@ export function DetectAdjustSymmetryPanel({
   onConfirm,
   onDetectFinerSymmetry,
   onDetectMajorAxis,
+  onDetectReflectionPlanes,
   onNext,
   state,
 }: DetectAdjustSymmetryPanelProps) {
   const majorReady = state.majorStatus === 'ready';
   const finerRunning = state.finerStatus === 'running';
   const majorRunning = state.majorStatus === 'running';
+  const reflectionReady = state.reflectionStatus === 'ready';
+  const reflectionRunning = state.reflectionStatus === 'running';
   const canDetectFiner = majorReady && state.family === 'axial' && !finerRunning;
   const canPropose = canProposeSymmetry(state);
 
@@ -38,7 +43,7 @@ export function DetectAdjustSymmetryPanel({
           onClick={onDetectMajorAxis}
           type="button"
         >
-          {majorRunning ? 'Detecting major axis' : 'Detect major axis'}
+          {majorRunning ? 'Detecting major rotation axis' : 'Detect major rotation axis'}
         </button>
 
         {state.majorStatus === 'empty' ? (
@@ -91,7 +96,11 @@ export function DetectAdjustSymmetryPanel({
       </section>
 
       <section className="node-section">
-        <FamilyPicker disabled={!majorReady} dispatch={dispatch} value={state.family} />
+        <FamilyPicker
+          families={rotationSymmetryFamilies}
+          onChange={(family) => dispatch({ family, type: 'familyPicked' })}
+          value={state.family}
+        />
 
         {state.family === 'axial' ? (
           <button
@@ -105,30 +114,81 @@ export function DetectAdjustSymmetryPanel({
         ) : null}
       </section>
 
-      {state.labels.length > 0 ? (
-        <section className="node-section">
-          <PointGroupSelect dispatch={dispatch} labels={state.labels} value={state.selectedLabel} />
-        </section>
-      ) : null}
+      <section className="node-section">
+        <PointGroupSelect dispatch={dispatch} labels={state.labels} value={state.selectedLabel} />
+      </section>
 
-      {state.family ? (
-        <section className="node-section">
+      <section className="node-section">
+        <VectorField
+          action={
+            <button
+              className="button button-neutral button-compact"
+              onClick={() => dispatch({ type: 'minorAxisNormalized' })}
+              type="button"
+            >
+              normalize
+            </button>
+          }
+          label="minor"
+          onChange={(axis) => dispatch({ axis, type: 'minorAxisChanged' })}
+          value={state.minorAxis}
+        />
+      </section>
+
+      <div className="node-section-divider" aria-hidden="true" />
+
+      <section className="node-section">
+        <button
+          className="button button-neutral"
+          disabled={reflectionRunning}
+          onClick={onDetectReflectionPlanes}
+          type="button"
+        >
+          {reflectionRunning ? 'Detecting reflection planes' : 'Detect reflection planes'}
+        </button>
+
+        {state.reflectionStatus === 'empty' ? (
+          <div className="empty-state">no reflection plane detected</div>
+        ) : null}
+
+        <div className="field-stack">
           <VectorField
             action={
               <button
                 className="button button-neutral button-compact"
-                onClick={() => dispatch({ type: 'minorAxisNormalized' })}
+                disabled={!reflectionReady}
+                onClick={() => dispatch({ type: 'reflectionNormalNormalized' })}
                 type="button"
               >
                 normalize
               </button>
             }
-            label="minor"
-            onChange={(axis) => dispatch({ axis, type: 'minorAxisChanged' })}
-            value={state.minorAxis}
+            disabled={!reflectionReady}
+            label="normal"
+            onChange={(normal) => dispatch({ normal, type: 'reflectionNormalChanged' })}
+            value={state.reflectionNormal}
           />
-        </section>
-      ) : null}
+
+          <VectorField
+            action={
+              <button
+                className="button button-neutral button-compact"
+                disabled={!reflectionReady}
+                onClick={() => dispatch({ type: 'reflectionCenterNormalized' })}
+                type="button"
+              >
+                normalize
+              </button>
+            }
+            disabled={!reflectionReady}
+            label="center"
+            onChange={(center) => dispatch({ center, type: 'reflectionCenterChanged' })}
+            value={state.reflectionCenter}
+          />
+        </div>
+      </section>
+
+      <div className="node-section-divider" aria-hidden="true" />
 
       <button
         className="button button-neutral"
@@ -143,11 +203,11 @@ export function DetectAdjustSymmetryPanel({
 
       <button
         className="button button-primary"
-        disabled={!state.proposedSymmetry || nodeReady}
+        disabled={!state.proposedSymmetry || nodeReady || state.confirming}
         onClick={onConfirm}
         type="button"
       >
-        Confirm
+        {state.confirming ? 'Confirming' : 'Confirm'}
       </button>
 
       {onNext ? (

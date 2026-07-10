@@ -43,7 +43,7 @@ function createAxisOverlay(
   const headLength = length - shaftLength;
   const material = new THREE.MeshBasicMaterial({
     color: overlay.color,
-    opacity: selected ? 1 : 0.82,
+    opacity: selected ? 1 : 0.4,
     transparent: true,
   });
   const orientation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
@@ -91,11 +91,13 @@ function createReflectionPlaneOverlay(
 
   const edgeX = edgeY.clone().cross(normal).normalize();
   const plane = new THREE.Mesh(
-    new THREE.PlaneGeometry(1, 1),
+    overlay.shape === 'disk'
+      ? new THREE.CircleGeometry(0.5, 64)
+      : new THREE.PlaneGeometry(1, 1),
     new THREE.MeshBasicMaterial({
       color: overlay.color,
       depthWrite: false,
-      opacity: selected ? 0.3 : 0.18,
+      opacity: selected ? 0.7 : 0.2,
       side: THREE.DoubleSide,
       transparent: true,
     }),

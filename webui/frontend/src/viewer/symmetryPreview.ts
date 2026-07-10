@@ -28,6 +28,26 @@ export function createSymmetryPreviewGroup(symmetry: SymmetryTuple | null, color
     return group;
   }
 
+  if (symmetry.label === 'S1') {
+    const normal = new THREE.Vector3(...symmetry.majorAxis).normalize();
+    const disk = new THREE.Mesh(
+      new THREE.CircleGeometry(0.5, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        depthTest: true,
+        depthWrite: false,
+        opacity: 0.3,
+        side: THREE.DoubleSide,
+        transparent: true,
+      }),
+    );
+
+    disk.position.set(...symmetry.center);
+    disk.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    group.add(disk);
+    return group;
+  }
+
   const axial = parseAxialSymmetryLabel(symmetry.label);
   if (axial) {
     group.add(createAxialSymmetryCylinder(symmetry, axial, colors));
