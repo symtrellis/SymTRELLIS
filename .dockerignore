@@ -1,8 +1,37 @@
-*
+# Keep the full clean repository in the Docker build context.
+# Docker builds need .git, .gitmodules, webui, inference, symtrellis, and
+# third_party so the image can install the project and initialize submodules.
 
-!setup.py
-!symtrellis/
-!symtrellis/**
-!inference/
-!inference/**
-!.dockerignore
+# Python cache/build outputs
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend local outputs
+webui/frontend/node_modules/
+webui/frontend/dist/
+
+# WebUI runtime/cache outputs
+webui_storage/
+.symtrellis-webui/
+.symtrellis-setup/
+
+# Notebook/runtime clutter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Local Docker outputs and development examples
+dockers/
+notebooks/
+examples/
+
+# Local editor/system files
+.vscode/
+.idea/
+.DS_Store

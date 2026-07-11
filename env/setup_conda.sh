@@ -30,9 +30,17 @@ TORCHVISION_VERSION=""
 PYTHON_VERSION=""
 PYTHON_CP_TAG=""
 TORCH_INDEX_URL=""
+CUMM_PACKAGE=""
+CUMM_VERSION=""
 SPCONV_PACKAGE=""
+SPCONV_VERSION=""
+SPCONV_INDEX_URL="${SPCONV_INDEX_URL:-https://ratharog.github.io/cumm-spconv/}"
 XFORMERS_VERSION="${XFORMERS_VERSION:-}"
 KAOLIN_FIND_LINKS="${KAOLIN_FIND_LINKS:-}"
+KAOLIN_INSTALL_MODE="${KAOLIN_INSTALL_MODE:-auto}"
+KAOLIN_REPO="${KAOLIN_REPO:-NVIDIAGameWorks/kaolin}"
+KAOLIN_REF="${KAOLIN_REF:-v0.18.0}"
+KAOLIN_RESOLVED_INSTALL_MODE=""
 TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-}"
 FLASH_ATTN_CUDA_KEY=""
 FLASH_ATTN_TORCH_KEY=""
@@ -51,7 +59,7 @@ FROM_STAGE=""
 ONLY_STAGE=""
 FORCE_CURRENT_STAGE=false
 
-CONDA_FORGE_PACKAGES=(gcc=11 gxx=11 cmake ninja pkg-config make git curl)
+CONDA_FORGE_PACKAGES=(gcc=11 gxx=11 cmake ninja pkg-config make git curl nodejs)
 NVIDIA_CUDA_PACKAGES=(
     cuda-nvcc cuda-cudart-dev cuda-driver-dev cuda-cccl cuda-nvrtc-dev cuda-nvtx
     libcusparse-dev libcublas-dev libcusolver-dev
@@ -60,17 +68,17 @@ NVIDIA_CUDA_PACKAGES=(
 PURE_PYTHON_PACKAGES=(
     black ipykernel notebook jupyterlab numpy scipy pandas tqdm pillow
     imageio imageio-ffmpeg opencv-python-headless trimesh open3d pymeshfix
-    pyvista xatlas "huggingface_hub[cli]" transformers safetensors easydict
+    pyvista xatlas "huggingface_hub[cli]" "transformers<5.4.0" safetensors easydict
     tensorboard lpips rembg open_clip_torch objaverse astor onnxruntime optree roma
     point-cloud-utils seaborn==0.13.2 gradio==5.49.0 matplotlib plotly
     kornia timm zstandard einops iopath scikit-image plyfile pygltflib
-    ipycanvas ipyevents usd-core warp-lang
+    ipycanvas ipyevents usd-core warp-lang fastapi uvicorn python-multipart
 )
 
 PURE_PYTHON_IMPORTS=(
     numpy scipy PIL imageio cv2 trimesh open3d xatlas huggingface_hub
     transformers safetensors easydict lpips rembg open_clip onnxruntime
-    optree point_cloud_utils kornia timm skimage utils3d
+    optree point_cloud_utils kornia timm skimage utils3d fastapi uvicorn multipart
 )
 
 STAGES=(
@@ -90,6 +98,7 @@ STAGES=(
     13-flexgemm
     14-ovoxel
     15-symtrellis
+    16-webui-frontend
 )
 
 usage() {
@@ -103,13 +112,16 @@ Example:
   bash env/setup_conda.sh --python 3.10 --torch 2.7.0 --cuda 12.8 --from-stage 05-flash-attn
 
 What it does:
-  - validates the torch/torchvision/xformers/spconv/kaolin wheel combination first
+  - validates the torch/torchvision/xformers/cumm-spconv wheel combination first
+  - resolves kaolin to a wheel install or a pinned source fallback
   - resolves the official flash-attn release tag, then forces a source build
   - creates a new conda environment named symtrellis by default
   - resumes a matching existing environment from the first incomplete stage
   - installs a minimal conda CUDA build toolchain, not full cuda or cuda-toolkit
   - installs each required source-built CUDA extension as a separate step
   - installs this repository with `pip install . --no-build-isolation`, not editable mode
+  - installs Node.js in the conda environment
+  - runs npm ci under webui/frontend for local WebUI development
   - can force reinstall from one stage or only one stage
 
 Environment overrides:
@@ -123,7 +135,11 @@ Environment overrides:
   FLASH_ATTN_REPO         flash-attn GitHub repository. Default: Dao-AILab/flash-attention
   FLASH_ATTN_RELEASE_TAG  Override flash-attn release tag, e.g. v2.7.4.post1
   XFORMERS_VERSION        Override the torch-derived xformers version.
+  SPCONV_INDEX_URL        Override cumm/spconv wheel index. Default: https://ratharog.github.io/cumm-spconv/
   KAOLIN_FIND_LINKS       Override the NVIDIA kaolin wheel index URL.
+  KAOLIN_INSTALL_MODE     auto, wheel, or source. Default: auto.
+  KAOLIN_REPO             Kaolin GitHub repository. Default: NVIDIAGameWorks/kaolin.
+  KAOLIN_REF              Kaolin source fallback ref. Default: v0.18.0.
   TORCH_CUDA_ARCH_LIST    Override the generated CUDA architecture list.
   MAX_JOBS                Optional compile parallelism cap. Default: 4.
 
@@ -133,6 +149,7 @@ Notes:
   - Existing conda environments are resumed only when their saved plan matches.
   - Resume state is stored under $CONDA_PREFIX/.symtrellis-setup and is removed with the env.
   - hydra-core and omegaconf are intentionally not installed.
+  - webui/frontend dependencies are installed, but webui/frontend/dist is not built.
   - pip is always run with --no-cache-dir and its script-local cache is purged.
 EOF
 }
@@ -229,7 +246,7 @@ python_cp_tag() {
 
 supported_cuda_or_die() {
     case "$1" in
-    11.8 | 12.1 | 12.4 | 12.6 | 12.8 | 12.9) ;;
+    11.8 | 12.1 | 12.4 | 12.6 | 12.8 | 12.9 | 13.0) ;;
     *) die "Unsupported CUDA version: $1. Add a mapping in supported_cuda_or_die()." ;;
     esac
 }
@@ -296,14 +313,38 @@ flash_attn_tag_compatible_with_xformers() {
     patch="${BASH_REMATCH[3]}"
 
     case "$XFORMERS_VERSION" in
-    0.0.25.post1 | 0.0.26.post1) min_version="2.5.2"; max_version="2.5.6" ;;
-    0.0.27 | 0.0.27.post2) min_version="2.5.7"; max_version="2.5.7" ;;
-    0.0.28 | 0.0.28.post2 | 0.0.28.post3) min_version="2.6.3"; max_version="2.6.3" ;;
-    0.0.29.post3) min_version="2.7.1"; max_version="2.7.2" ;;
-    0.0.30) min_version="2.7.1"; max_version="2.7.4" ;;
-    0.0.31.post1) min_version="2.7.1"; max_version="2.8.0" ;;
-    0.0.32.post2) min_version="2.7.1"; max_version="2.8.2" ;;
-    0.0.33.post1 | 0.0.33.post2 | 0.0.34 | 0.0.35) min_version="2.7.1"; max_version="2.8.4" ;;
+    0.0.25.post1 | 0.0.26.post1)
+        min_version="2.5.2"
+        max_version="2.5.6"
+        ;;
+    0.0.27 | 0.0.27.post2)
+        min_version="2.5.7"
+        max_version="2.5.7"
+        ;;
+    0.0.28 | 0.0.28.post2 | 0.0.28.post3)
+        min_version="2.6.3"
+        max_version="2.6.3"
+        ;;
+    0.0.29.post3)
+        min_version="2.7.1"
+        max_version="2.7.2"
+        ;;
+    0.0.30)
+        min_version="2.7.1"
+        max_version="2.7.4"
+        ;;
+    0.0.31.post1)
+        min_version="2.7.1"
+        max_version="2.8.0"
+        ;;
+    0.0.32.post2)
+        min_version="2.7.1"
+        max_version="2.8.2"
+        ;;
+    0.0.33.post1 | 0.0.33.post2 | 0.0.34 | 0.0.35)
+        min_version="2.7.1"
+        max_version="2.8.4"
+        ;;
     *) die "Unknown flash-attn compatibility range for xformers $XFORMERS_VERSION" ;;
     esac
 
@@ -316,10 +357,58 @@ flash_attn_tag_compatible_with_xformers() {
     ((version_score >= min_score && version_score <= max_score))
 }
 
-spconv_pkg_for_cuda() {
+set_spconv_plan_for_cuda() {
     case "$1" in
-    11.8) echo "spconv-cu118" ;;
-    12.*) echo "spconv-cu120" ;;
+    11.8)
+        CUMM_PACKAGE="cumm-cu113"
+        CUMM_VERSION="0.7.14"
+        SPCONV_PACKAGE="spconv-cu113"
+        SPCONV_VERSION="2.4.1"
+        case "$PYTHON_CP_TAG" in
+        cp39 | cp310 | cp311) ;;
+        *) die "cumm/spconv cu113 supports Python 3.9-3.11 only" ;;
+        esac
+        ;;
+    12.1 | 12.4)
+        CUMM_PACKAGE="cumm-cu121"
+        CUMM_VERSION="0.7.14"
+        SPCONV_PACKAGE="spconv-cu121"
+        SPCONV_VERSION="2.4.1"
+        case "$PYTHON_CP_TAG" in
+        cp39 | cp310 | cp311) ;;
+        *) die "cumm/spconv cu121 supports Python 3.9-3.11 only" ;;
+        esac
+        ;;
+    12.6)
+        CUMM_PACKAGE="cumm-cu126"
+        CUMM_VERSION="0.9.1"
+        SPCONV_PACKAGE="spconv-cu126"
+        SPCONV_VERSION="2.4.1"
+        case "$PYTHON_CP_TAG" in
+        cp311 | cp312 | cp313 | cp314) ;;
+        *) die "cumm/spconv cu126 supports Python 3.11-3.14 only" ;;
+        esac
+        ;;
+    12.8 | 12.9)
+        CUMM_PACKAGE="cumm-cu128"
+        CUMM_VERSION="0.9.1"
+        SPCONV_PACKAGE="spconv-cu128"
+        SPCONV_VERSION="2.4.1"
+        case "$PYTHON_CP_TAG" in
+        cp311 | cp312 | cp313 | cp314) ;;
+        *) die "cumm/spconv cu128 supports Python 3.11-3.14 only" ;;
+        esac
+        ;;
+    13.0)
+        CUMM_PACKAGE="cumm-cu130"
+        CUMM_VERSION="0.9.1"
+        SPCONV_PACKAGE="spconv-cu130"
+        SPCONV_VERSION="2.4.1"
+        case "$PYTHON_CP_TAG" in
+        cp311 | cp312 | cp313 | cp314) ;;
+        *) die "cumm/spconv cu130 supports Python 3.11-3.14 only" ;;
+        esac
+        ;;
     *) die "Unsupported CUDA version for spconv: $1" ;;
     esac
 }
@@ -344,6 +433,14 @@ default_arch_list_for_torch_cuda() {
             echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.3;12.0;12.1+PTX"
             ;;
         *) echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0+PTX" ;;
+        esac
+        ;;
+    13.0)
+        case "$torch_mm" in
+        2.9 | 2.10 | 2.11 | 2.12)
+            echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.3;12.0;12.1+PTX"
+            ;;
+        *) die "Unsupported torch/CUDA pair for arch list: $1 / $2" ;;
         esac
         ;;
     *) die "Unsupported CUDA version for arch list: $2" ;;
@@ -458,9 +555,8 @@ derive_versions() {
     PYTHON_CP_TAG="$(python_cp_tag "$PYTHON_VERSION")"
     TORCHVISION_VERSION="$(torchvision_for_torch "$TORCH_VERSION")"
     TORCH_INDEX_URL="https://download.pytorch.org/whl/${CUDA_TAG}"
-    SPCONV_PACKAGE="$(spconv_pkg_for_cuda "$CUDA_MINOR_VERSION")"
+    set_spconv_plan_for_cuda "$CUDA_MINOR_VERSION"
     XFORMERS_VERSION="${XFORMERS_VERSION:-$(xformers_for_torch "$TORCH_VERSION")}"
-    KAOLIN_FIND_LINKS="${KAOLIN_FIND_LINKS:-https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-${TORCH_VERSION}_${CUDA_TAG}.html}"
     TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-$(default_arch_list_for_torch_cuda "$TORCH_VERSION" "$CUDA_MINOR_VERSION")}"
     FLASH_ATTN_CUDA_KEY="cu${CUDA_MINOR_VERSION%%.*}"
     FLASH_ATTN_TORCH_KEY="torch${TORCH_VERSION%.*}"
@@ -505,6 +601,49 @@ EOF
     rm -f "$html"
 }
 
+wheel_exists_in_index() {
+    local url="$1" pattern="$2" html found
+    html="$(mktemp)"
+    if ! curl -fsSL "$url" -o "$html" 2>/dev/null; then
+        rm -f "$html"
+        return 1
+    fi
+    if grep -Eq "$pattern" "$html"; then
+        found=0
+    else
+        found=1
+    fi
+    rm -f "$html"
+    return "$found"
+}
+
+resolve_kaolin_plan() {
+    local pattern
+    KAOLIN_FIND_LINKS="${KAOLIN_FIND_LINKS:-https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-${TORCH_VERSION}_${CUDA_TAG}.html}"
+
+    case "$KAOLIN_INSTALL_MODE" in
+    auto | wheel | source) ;;
+    *) die "KAOLIN_INSTALL_MODE must be auto, wheel, or source" ;;
+    esac
+
+    if [[ "$KAOLIN_INSTALL_MODE" == "source" ]]; then
+        KAOLIN_RESOLVED_INSTALL_MODE="source build ${KAOLIN_REPO}@${KAOLIN_REF}"
+        return
+    fi
+
+    pattern="kaolin-[0-9][^\"'<> ]*-${PYTHON_CP_TAG}-${PYTHON_CP_TAG}-[^\"'<> ]*x86_64\\.whl"
+    if wheel_exists_in_index "$KAOLIN_FIND_LINKS" "$pattern"; then
+        KAOLIN_RESOLVED_INSTALL_MODE="wheel ${KAOLIN_FIND_LINKS}"
+        return
+    fi
+
+    if [[ "$KAOLIN_INSTALL_MODE" == "wheel" ]]; then
+        die "kaolin wheel not found for torch ${TORCH_VERSION}, cuda ${CUDA_TAG}, python ${PYTHON_CP_TAG}: ${KAOLIN_FIND_LINKS}"
+    fi
+
+    KAOLIN_RESOLVED_INSTALL_MODE="source build ${KAOLIN_REPO}@${KAOLIN_REF}"
+}
+
 preflight_pytorch_wheel() {
     local pkg="$1" version="$2" path="$3"
     local pkg_re version_re cp_re cuda_re pattern
@@ -518,14 +657,24 @@ preflight_pytorch_wheel() {
 
 preflight_plain_wheel() {
     local pkg="$1" version="$2" url="$3"
-    local pkg_re version_re cp_re pattern
+    local pkg_re version_re cp_re python_tag_re pattern
     pkg_re="$(regex_escape "$pkg" | sed 's/-/[-_]/g')"
     cp_re="$(regex_escape "$PYTHON_CP_TAG")"
+    case "$PYTHON_CP_TAG" in
+    cp38) python_tag_re="(${cp_re}-${cp_re}|cp38-abi3)" ;;
+    cp39) python_tag_re="(${cp_re}-${cp_re}|(cp38|cp39)-abi3)" ;;
+    cp310) python_tag_re="(${cp_re}-${cp_re}|(cp38|cp39|cp310)-abi3)" ;;
+    cp311) python_tag_re="(${cp_re}-${cp_re}|(cp38|cp39|cp310|cp311)-abi3)" ;;
+    cp312) python_tag_re="(${cp_re}-${cp_re}|(cp38|cp39|cp310|cp311|cp312)-abi3)" ;;
+    cp313) python_tag_re="(${cp_re}-${cp_re}|(cp38|cp39|cp310|cp311|cp312|cp313)-abi3)" ;;
+    cp314) python_tag_re="(${cp_re}-${cp_re}|(cp38|cp39|cp310|cp311|cp312|cp313|cp314)-abi3)" ;;
+    *) python_tag_re="${cp_re}-${cp_re}" ;;
+    esac
     if [[ -n "$version" ]]; then
         version_re="$(regex_escape "$version")"
-        pattern="${pkg_re}-${version_re}((%2B|\\+)[^\"'<> ]*)?-${cp_re}-${cp_re}-[^\"'<> ]*x86_64\\.whl"
+        pattern="${pkg_re}-${version_re}((%2B|\\+)[^\"'<> ]*)?-${python_tag_re}-[^\"'<> ]*x86_64\\.whl"
     else
-        pattern="${pkg_re}-[0-9][^\"'<> ]*-${cp_re}-${cp_re}-[^\"'<> ]*x86_64\\.whl"
+        pattern="${pkg_re}-[0-9][^\"'<> ]*-${python_tag_re}-[^\"'<> ]*x86_64\\.whl"
     fi
     preflight_index_wheel "$pkg" "$version" "$url" "$pattern"
 }
@@ -535,8 +684,12 @@ preflight_wheels() {
     preflight_pytorch_wheel torch "$TORCH_VERSION" torch
     preflight_pytorch_wheel torchvision "$TORCHVISION_VERSION" torchvision
     preflight_plain_wheel xformers "$XFORMERS_VERSION" "${TORCH_INDEX_URL}/xformers/"
-    preflight_plain_wheel "$SPCONV_PACKAGE" "" "https://pypi.org/simple/${SPCONV_PACKAGE}/"
-    preflight_plain_wheel kaolin "" "$KAOLIN_FIND_LINKS"
+    preflight_plain_wheel "$CUMM_PACKAGE" "$CUMM_VERSION" "${SPCONV_INDEX_URL%/}/${CUMM_PACKAGE}/"
+    preflight_plain_wheel "$SPCONV_PACKAGE" "$SPCONV_VERSION" "${SPCONV_INDEX_URL%/}/${SPCONV_PACKAGE}/"
+    resolve_kaolin_plan
+    if [[ "$KAOLIN_RESOLVED_INSTALL_MODE" == wheel* ]]; then
+        preflight_plain_wheel kaolin "" "$KAOLIN_FIND_LINKS"
+    fi
 }
 
 github_release_asset_url() {
@@ -660,6 +813,10 @@ symtrellis_git_head() {
     git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo "unknown"
 }
 
+webui_frontend_lock_hash() {
+    sha256sum "${REPO_DIR}/webui/frontend/package-lock.json" | awk '{print $1}'
+}
+
 plan_content() {
     cat <<EOF
 SETUP_SCHEMA=1
@@ -673,7 +830,15 @@ TORCH_VERSION=${TORCH_VERSION}
 TORCHVISION_VERSION=${TORCHVISION_VERSION}
 TORCH_INDEX_URL=${TORCH_INDEX_URL}
 XFORMERS_VERSION=${XFORMERS_VERSION}
+CUMM_PACKAGE=${CUMM_PACKAGE}
+CUMM_VERSION=${CUMM_VERSION}
 SPCONV_PACKAGE=${SPCONV_PACKAGE}
+SPCONV_VERSION=${SPCONV_VERSION}
+SPCONV_INDEX_URL=${SPCONV_INDEX_URL}
+KAOLIN_INSTALL_MODE=${KAOLIN_INSTALL_MODE}
+KAOLIN_RESOLVED_INSTALL_MODE=${KAOLIN_RESOLVED_INSTALL_MODE}
+KAOLIN_REPO=${KAOLIN_REPO}
+KAOLIN_REF=${KAOLIN_REF}
 KAOLIN_FIND_LINKS=${KAOLIN_FIND_LINKS}
 TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 BLENDER_VERSION=${BLENDER_VERSION}
@@ -783,7 +948,7 @@ run_registered_stage() {
         ;;
     04-cuda-wheels)
         run_stage "$stage" verify_cuda_wheels install_cuda_wheels \
-            "XFORMERS_VERSION=${XFORMERS_VERSION}"$'\n'"SPCONV_PACKAGE=${SPCONV_PACKAGE}"$'\n'"TORCH_INDEX_URL=${TORCH_INDEX_URL}"
+            "XFORMERS_VERSION=${XFORMERS_VERSION}"$'\n'"CUMM_PACKAGE=${CUMM_PACKAGE}"$'\n'"CUMM_VERSION=${CUMM_VERSION}"$'\n'"SPCONV_PACKAGE=${SPCONV_PACKAGE}"$'\n'"SPCONV_VERSION=${SPCONV_VERSION}"$'\n'"SPCONV_INDEX_URL=${SPCONV_INDEX_URL}"$'\n'"TORCH_INDEX_URL=${TORCH_INDEX_URL}"
         ;;
     05-flash-attn)
         run_stage "$stage" verify_flash_attn install_flash_attn \
@@ -795,7 +960,7 @@ run_registered_stage() {
         ;;
     07-kaolin)
         run_stage "$stage" verify_kaolin install_kaolin \
-            "KAOLIN_FIND_LINKS=${KAOLIN_FIND_LINKS}"
+            "KAOLIN_INSTALL_MODE=${KAOLIN_INSTALL_MODE}"$'\n'"KAOLIN_RESOLVED_INSTALL_MODE=${KAOLIN_RESOLVED_INSTALL_MODE}"$'\n'"KAOLIN_REPO=${KAOLIN_REPO}"$'\n'"KAOLIN_REF=${KAOLIN_REF}"$'\n'"KAOLIN_FIND_LINKS=${KAOLIN_FIND_LINKS}"
         ;;
     08-gsplat)
         run_stage "$stage" verify_gsplat install_gsplat \
@@ -828,6 +993,10 @@ run_registered_stage() {
     15-symtrellis)
         run_stage "$stage" verify_symtrellis install_symtrellis \
             "SYMTRELLIS_GIT_HEAD=$(symtrellis_git_head)"
+        ;;
+    16-webui-frontend)
+        run_stage "$stage" verify_webui_frontend install_webui_frontend \
+            "WEBUI_FRONTEND_LOCK_HASH=$(webui_frontend_lock_hash)"
         ;;
     *) die "unknown stage: $stage" ;;
     esac
@@ -1001,7 +1170,10 @@ install_pure_python_stack() {
 install_cuda_wheels() {
     section "Install CUDA/Torch wheels"
     pip_install --only-binary=:all: --no-deps "xformers==${XFORMERS_VERSION}" --index-url "$TORCH_INDEX_URL"
-    pip_install --only-binary=:all: "$SPCONV_PACKAGE"
+    pip_install --only-binary=:all: \
+        "$CUMM_PACKAGE==$CUMM_VERSION" \
+        "$SPCONV_PACKAGE==$SPCONV_VERSION" \
+        --index-url "$SPCONV_INDEX_URL"
 }
 
 install_flash_attn() {
@@ -1045,8 +1217,17 @@ install_git_source_build() {
 }
 
 install_kaolin() {
-    section "Install kaolin wheel"
-    pip_install --only-binary=:all: --no-index --no-deps --find-links "$KAOLIN_FIND_LINKS" kaolin
+    section "Install kaolin"
+    if [[ "$KAOLIN_RESOLVED_INSTALL_MODE" == wheel* ]]; then
+        pip_install --only-binary=:all: --no-index --no-deps --find-links "$KAOLIN_FIND_LINKS" kaolin
+    else
+        reset_ext_dir
+        prepare_build_env
+        git clone --depth 1 --branch "$KAOLIN_REF" \
+            "https://github.com/${KAOLIN_REPO}.git" \
+            "${EXT_DIR}/kaolin"
+        pip_install --no-build-isolation "${EXT_DIR}/kaolin"
+    fi
 }
 
 install_nvdiffrast() {
@@ -1091,6 +1272,13 @@ install_symtrellis() {
     cd "$REPO_DIR"
     pip_install_command --no-deps --no-build-isolation .
     pip_cleanup
+}
+
+install_webui_frontend() {
+    section "Install WebUI frontend packages"
+    cd "${REPO_DIR}/webui/frontend"
+    npm ci
+    npm cache clean --force
 }
 
 verify_imports() {
@@ -1176,15 +1364,36 @@ verify_pure_python_stack() {
 
 verify_cuda_wheels() {
     verify_torch_stack
-    XFORMERS_EXPECTED="$XFORMERS_VERSION" python <<'PY'
+    XFORMERS_EXPECTED="$XFORMERS_VERSION" \
+        CUMM_PACKAGE="$CUMM_PACKAGE" \
+        CUMM_VERSION="$CUMM_VERSION" \
+        SPCONV_PACKAGE="$SPCONV_PACKAGE" \
+        SPCONV_VERSION="$SPCONV_VERSION" \
+        python <<'PY'
 import os
+from importlib.metadata import version
+
+import cumm
 import spconv
+import spconv.pytorch
 import xformers
 
 expected = os.environ["XFORMERS_EXPECTED"]
 actual = xformers.__version__.split("+", 1)[0]
 if actual != expected:
     raise SystemExit(f"xformers version mismatch: expected {expected}, got {xformers.__version__}")
+
+cumm_package = os.environ["CUMM_PACKAGE"]
+cumm_expected = os.environ["CUMM_VERSION"]
+cumm_actual = version(cumm_package)
+if cumm_actual != cumm_expected:
+    raise SystemExit(f"{cumm_package} version mismatch: expected {cumm_expected}, got {cumm_actual}")
+
+spconv_package = os.environ["SPCONV_PACKAGE"]
+spconv_expected = os.environ["SPCONV_VERSION"]
+spconv_actual = version(spconv_package)
+if spconv_actual != spconv_expected:
+    raise SystemExit(f"{spconv_package} version mismatch: expected {spconv_expected}, got {spconv_actual}")
 PY
 }
 
@@ -1246,6 +1455,15 @@ verify_symtrellis() {
         symtrellis.mapper.attention.csr_attn_ext._C
 }
 
+verify_webui_frontend() {
+    command -v node >/dev/null
+    command -v npm >/dev/null
+    [[ -f "${REPO_DIR}/webui/frontend/package-lock.json" ]]
+    [[ -x "${REPO_DIR}/webui/frontend/node_modules/.bin/vite" ]]
+    [[ -d "${REPO_DIR}/webui/frontend/node_modules/react" ]]
+    [[ -d "${REPO_DIR}/webui/frontend/node_modules/three" ]]
+}
+
 verify_install() {
     section "Verify imports that do not require a visible GPU driver"
     verify_torch_stack
@@ -1297,8 +1515,10 @@ Conda environment installed:
   torch:       ${TORCH_VERSION}
   torchvision: ${TORCHVISION_VERSION}
   xformers:    ${XFORMERS_VERSION}
-  spconv:      ${SPCONV_PACKAGE}
-  kaolin index: ${KAOLIN_FIND_LINKS}
+  cumm:        ${CUMM_PACKAGE}==${CUMM_VERSION}
+  spconv:      ${SPCONV_PACKAGE}==${SPCONV_VERSION}
+  spconv idx:  ${SPCONV_INDEX_URL}
+  kaolin:      ${KAOLIN_RESOLVED_INSTALL_MODE}
   flash-attn:  ${FLASH_ATTN_INSTALL_MODE}
   o-voxel:     ${OVOXEL_INSTALL_MODE}
   arch list:   ${TORCH_CUDA_ARCH_LIST}
