@@ -9,9 +9,36 @@ from .config import NeighborGraphLatentMapperConfig, Swin3DLatentMapperConfig
 from .model import NeighborGraphLatentMapper, Swin3DLatentMapper
 
 PRETRAINED_MAPPER_PATHS = {
+    # TRELLIS.2 sparse structure
     "trellis2_sparse_structure_neighbor_graph_pretrain": "trellis2/sparse_structure/neighbor_graph/pretrain",
     "trellis2_sparse_structure_neighbor_graph_finetune": "trellis2/sparse_structure/neighbor_graph/finetune",
+    "trellis2_sparse_structure_swin3d_pretrain": "trellis2/sparse_structure/swin3d/pretrain",
+    "trellis2_sparse_structure_swin3d_finetune": "trellis2/sparse_structure/swin3d/finetune",
+    # TRELLIS.2 shape
     "trellis2_shape_neighbor_graph_pretrain": "trellis2/shape/neighbor_graph/pretrain",
+    "trellis2_shape_neighbor_graph_finetune": "trellis2/shape/neighbor_graph/finetune",
+    "trellis2_shape_swin3d_pretrain": "trellis2/shape/swin3d/pretrain",
+    "trellis2_shape_swin3d_finetune": "trellis2/shape/swin3d/finetune",
+    # TRELLIS sparse structure shares the TRELLIS.2 sparse-structure mapper.
+    "trellis_sparse_structure_neighbor_graph_pretrain": "trellis2/sparse_structure/neighbor_graph/pretrain",
+    "trellis_sparse_structure_neighbor_graph_finetune": "trellis2/sparse_structure/neighbor_graph/finetune",
+    "trellis_sparse_structure_swin3d_pretrain": "trellis2/sparse_structure/swin3d/pretrain",
+    "trellis_sparse_structure_swin3d_finetune": "trellis2/sparse_structure/swin3d/finetune",
+    # TRELLIS shape
+    "trellis_shape_neighbor_graph_pretrain": "trellis/shape/neighbor_graph/pretrain",
+    "trellis_shape_neighbor_graph_finetune": "trellis/shape/neighbor_graph/finetune",
+    "trellis_shape_swin3d_pretrain": "trellis/shape/swin3d/pretrain",
+    "trellis_shape_swin3d_finetune": "trellis/shape/swin3d/finetune",
+    # SAM 3D Objects sparse structure
+    "sam3d_objects_sparse_structure_neighbor_graph_pretrain": "sam3d_objects/sparse_structure/neighbor_graph/pretrain",
+    "sam3d_objects_sparse_structure_neighbor_graph_finetune": "sam3d_objects/sparse_structure/neighbor_graph/finetune",
+    "sam3d_objects_sparse_structure_swin3d_pretrain": "sam3d_objects/sparse_structure/swin3d/pretrain",
+    "sam3d_objects_sparse_structure_swin3d_finetune": "sam3d_objects/sparse_structure/swin3d/finetune",
+    # SAM 3D Objects shape
+    "sam3d_objects_shape_neighbor_graph_pretrain": "sam3d_objects/shape/neighbor_graph/pretrain",
+    "sam3d_objects_shape_neighbor_graph_finetune": "sam3d_objects/shape/neighbor_graph/finetune",
+    "sam3d_objects_shape_swin3d_pretrain": "sam3d_objects/shape/swin3d/pretrain",
+    "sam3d_objects_shape_swin3d_finetune": "sam3d_objects/shape/swin3d/finetune",
 }
 
 

@@ -414,36 +414,55 @@ set_spconv_plan_for_cuda() {
 }
 
 default_arch_list_for_torch_cuda() {
-    local torch_mm="${1%.*}"
-    case "$2" in
+    local torch_version="$1"
+    local cuda_version="$2"
+    local torch_mm="${torch_version%.*}"
+
+    case "$cuda_version" in
     11.8 | 12.1 | 12.4 | 12.6)
         echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0+PTX"
         ;;
     12.8)
         case "$torch_mm" in
-        2.7 | 2.8 | 2.9 | 2.10 | 2.11 | 2.12)
+        2.7 | 2.8)
             echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0+PTX"
             ;;
-        *) echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0+PTX" ;;
+        2.9 | 2.10 | 2.11 | 2.12 | 2.13 | 2.14)
+            echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;12.0+PTX"
+            ;;
+        *)
+            echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0+PTX"
+            ;;
         esac
         ;;
     12.9)
         case "$torch_mm" in
-        2.8 | 2.9 | 2.10 | 2.11 | 2.12)
+        2.8)
+            echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;10.3;12.0;12.1+PTX"
+            ;;
+        2.9 | 2.10 | 2.11 | 2.12 | 2.13 | 2.14)
             echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.3;12.0;12.1+PTX"
             ;;
-        *) echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0+PTX" ;;
+        *)
+            echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0+PTX"
+            ;;
         esac
         ;;
     13.0)
         case "$torch_mm" in
-        2.9 | 2.10 | 2.11 | 2.12)
-            echo "7.5;8.0;8.6;8.7;8.8;8.9;9.0;10.0;10.3;11.0;12.0;12.1+PTX"
+        2.9 | 2.10 | 2.11 | 2.12 | 2.13 | 2.14)
+            echo "7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.3;11.0;12.0;12.1+PTX"
             ;;
-        *) die "Unsupported torch/CUDA pair for arch list: $1 / $2" ;;
+        *)
+            echo "7.5;8.0;8.6;8.7;8.9;9.0+PTX"
+            ;;
         esac
         ;;
-    *) die "Unsupported CUDA version for arch list: $2" ;;
+    *)
+        echo "Unsupported CUDA version: $cuda_version" >&2
+        echo "Add an arch list mapping in default_arch_list_for_torch_cuda()." >&2
+        exit 2
+        ;;
     esac
 }
 
