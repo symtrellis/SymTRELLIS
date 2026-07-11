@@ -439,7 +439,7 @@ default_arch_list_for_torch_cuda() {
     13.0)
         case "$torch_mm" in
         2.9 | 2.10 | 2.11 | 2.12)
-            echo "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.3;12.0;12.1+PTX"
+            echo "7.5;8.0;8.6;8.7;8.8;8.9;9.0;10.0;10.3;11.0;12.0;12.1+PTX"
             ;;
         *) die "Unsupported torch/CUDA pair for arch list: $1 / $2" ;;
         esac
@@ -906,6 +906,16 @@ EOF
     emit_clean
     cat <<EOF
 RUN python -m pip install --no-cache-dir --only-binary=:all: \\
+    nvidia-arch \\
+    pccm \\
+    ccimport \\
+    pybind11 \\
+    fire \\
+    sympy \\
+EOF
+    emit_clean
+    cat <<EOF
+RUN python -m pip install --no-cache-dir --only-binary=:all: --no-deps \\
     ${CUMM_PACKAGE}==${CUMM_VERSION} \\
     ${SPCONV_PACKAGE}==${SPCONV_VERSION} \\
     --index-url ${SPCONV_INDEX_URL} \\
