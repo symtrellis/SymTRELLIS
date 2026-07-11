@@ -18,7 +18,7 @@ from symtrellis.flow import (
     SymmetryProjectionGuidanceWrapper,
     SymmetryProjectionNoiseSampler,
 )
-from symtrellis.mapper import SymmetryProjector
+from symtrellis.mapper import SymmetryProjector, concat_coeff
 from symtrellis.symmetry import build_symmetry_relation_inputs, get_3d_point_group
 
 from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
@@ -26,6 +26,8 @@ from . import Emit, Operation, OperationContext, OperationInputs, OperationOutpu
 from .symmetry import ConfirmDetectedSymmetry, ConfirmManualSymmetry
 from .trellis2_symmetry_sparse_structure import Trellis2SymmetrySparseStructure
 from .trellis2_vanilla_shape import SHAPE_LATENT, SHAPE_RAW_MESH, SHAPE_VISUALIZATION_MESH
+
+SHAPE_MAPPER_RELATION_CHUNK_SIZE = 1
 
 
 class Trellis2SymmetryShape(Operation):
@@ -139,10 +141,7 @@ class Trellis2SymmetryShape(Operation):
         occ_coordinates = torch.load(inputs.paths["occ_coordinates"], map_location="cpu")
 
         shape_flow_model = self.loader.shape_flow_model_512
-        shape_flow_model.to(DEVICE)
-        condition_512 = condition_512.to(DEVICE)
         occ_coordinates = occ_coordinates.to(DEVICE)
-        neg_condition_512 = torch.zeros_like(condition_512)
 
         O_dst2src, t_dst2src, s_dst2src = get_3d_point_group(
             label=symmetry_label,
@@ -151,24 +150,51 @@ class Trellis2SymmetryShape(Operation):
             minor_axis=symmetry_minor_axis,
             include_identity=False,
         )
-        relations = [(O_dst2src, t_dst2src, s_dst2src) for _ in range(condition_512.shape[0])]
-
-        shape_coords_src, shape_coords_dst, shape_rows_src, shape_rows_dst, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
-            coords=occ_coordinates,
-            relations=relations,
-            grid_size=32,
-        )
 
         shape_mapper = self.loader.shape_mapper
         shape_mapper.to(DEVICE)
-        shape_coeff = shape_mapper(
-            coords_src=shape_coords_src,
-            coords_dst=shape_coords_dst,
-            O_dst2src=shape_O,
-            t_dst2src=shape_t,
-            s_dst2src=shape_s,
-        )
+
+        shape_coeff_chunks = []
+        shape_rows_src_chunks = []
+        shape_rows_dst_chunks = []
+
+        for relation_start in range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE):
+            relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
+            chunk_relations = [
+                (
+                    O_dst2src[relation_start:relation_end],
+                    t_dst2src[relation_start:relation_end],
+                    s_dst2src[relation_start:relation_end],
+                )
+                for _ in range(condition_512.shape[0])
+            ]
+
+            shape_coords_src, shape_coords_dst, shape_rows_src_chunk, shape_rows_dst_chunk, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
+                coords=occ_coordinates,
+                relations=chunk_relations,
+                grid_size=32,
+            )
+            shape_coeff_chunk = shape_mapper(
+                coords_src=shape_coords_src,
+                coords_dst=shape_coords_dst,
+                O_dst2src=shape_O,
+                t_dst2src=shape_t,
+                s_dst2src=shape_s,
+            )
+            shape_coeff_chunks.append(shape_coeff_chunk.to(torch.device("cpu")))
+            shape_rows_src_chunks.append(shape_rows_src_chunk.cpu())
+            shape_rows_dst_chunks.append(shape_rows_dst_chunk.cpu())
+            del shape_coeff_chunk
+            del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
+            del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
+
         shape_mapper.cpu()
+        torch.cuda.empty_cache()
+
+        shape_coeff = concat_coeff(shape_coeff_chunks).to(torch.device(DEVICE))
+        shape_rows_src = torch.cat(shape_rows_src_chunks).to(DEVICE)
+        shape_rows_dst = torch.cat(shape_rows_dst_chunks).to(DEVICE)
+        del shape_coeff_chunks, shape_rows_src_chunks, shape_rows_dst_chunks
 
         shape_projector = SymmetryProjector(
             num_rows=occ_coordinates.shape[0],
@@ -180,6 +206,10 @@ class Trellis2SymmetryShape(Operation):
             coords=occ_coordinates,
             sp_class=SparseTensor,
         )
+
+        shape_flow_model.to(DEVICE)
+        condition_512 = condition_512.to(DEVICE)
+        neg_condition_512 = torch.zeros_like(condition_512)
 
         noise_sampler = SymmetryProjectionNoiseSampler(
             sampler=TRELLIS2ShapeLatentNoiseSampler(),
@@ -245,8 +275,8 @@ class Trellis2SymmetryShape(Operation):
         shape_flow_model.cpu()
         condition_512 = condition_512.cpu()
         neg_condition_512 = neg_condition_512.cpu()
-        del shape_projector, shape_coeff, shape_coords_src, shape_coords_dst
-        del shape_rows_src, shape_rows_dst, shape_O, shape_t, shape_s, shape_view
+        del shape_projector, shape_coeff
+        del shape_rows_src, shape_rows_dst, shape_view
         torch.cuda.empty_cache()
 
         if mode == "512":
@@ -254,8 +284,6 @@ class Trellis2SymmetryShape(Operation):
             shape_grid_size = 512
         else:
             condition_1024 = torch.load(inputs.paths["image_condition_1024"], map_location="cpu")
-            condition_1024 = condition_1024.to(DEVICE)
-            neg_condition_1024 = torch.zeros_like(condition_1024)
 
             shape_decoder = self.loader.shape_decoder
             shape_decoder.to(DEVICE)
@@ -286,22 +314,50 @@ class Trellis2SymmetryShape(Operation):
                     shape_grid_size = candidate_shape_latent_grid_size * 16
                     break
 
-            shape_coords_src, shape_coords_dst, shape_rows_src, shape_rows_dst, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
-                coords=cascade_coordinates,
-                relations=relations,
-                grid_size=shape_latent_grid_size,
-            )
-
             shape_mapper = self.loader.shape_mapper
             shape_mapper.to(DEVICE)
-            shape_coeff = shape_mapper(
-                coords_src=shape_coords_src,
-                coords_dst=shape_coords_dst,
-                O_dst2src=shape_O,
-                t_dst2src=shape_t,
-                s_dst2src=shape_s,
-            )
+
+            shape_coeff_chunks = []
+            shape_rows_src_chunks = []
+            shape_rows_dst_chunks = []
+
+            for relation_start in range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE):
+                relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
+                chunk_relations = [
+                    (
+                        O_dst2src[relation_start:relation_end],
+                        t_dst2src[relation_start:relation_end],
+                        s_dst2src[relation_start:relation_end],
+                    )
+                    for _ in range(condition_1024.shape[0])
+                ]
+
+                shape_coords_src, shape_coords_dst, shape_rows_src_chunk, shape_rows_dst_chunk, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
+                    coords=cascade_coordinates,
+                    relations=chunk_relations,
+                    grid_size=shape_latent_grid_size,
+                )
+                shape_coeff_chunk = shape_mapper(
+                    coords_src=shape_coords_src,
+                    coords_dst=shape_coords_dst,
+                    O_dst2src=shape_O,
+                    t_dst2src=shape_t,
+                    s_dst2src=shape_s,
+                )
+                shape_coeff_chunks.append(shape_coeff_chunk.to(torch.device("cpu")))
+                shape_rows_src_chunks.append(shape_rows_src_chunk.cpu())
+                shape_rows_dst_chunks.append(shape_rows_dst_chunk.cpu())
+                del shape_coeff_chunk
+                del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
+                del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
+
             shape_mapper.cpu()
+            torch.cuda.empty_cache()
+
+            shape_coeff = concat_coeff(shape_coeff_chunks).to(torch.device(DEVICE))
+            shape_rows_src = torch.cat(shape_rows_src_chunks).to(DEVICE)
+            shape_rows_dst = torch.cat(shape_rows_dst_chunks).to(DEVICE)
+            del shape_coeff_chunks, shape_rows_src_chunks, shape_rows_dst_chunks
 
             shape_projector = SymmetryProjector(
                 num_rows=cascade_coordinates.shape[0],
@@ -316,6 +372,8 @@ class Trellis2SymmetryShape(Operation):
 
             shape_flow_model = self.loader.shape_flow_model_1024
             shape_flow_model.to(DEVICE)
+            condition_1024 = condition_1024.to(DEVICE)
+            neg_condition_1024 = torch.zeros_like(condition_1024)
 
             noise_sampler = SymmetryProjectionNoiseSampler(
                 sampler=TRELLIS2ShapeLatentNoiseSampler(),
@@ -382,8 +440,8 @@ class Trellis2SymmetryShape(Operation):
             shape_flow_model.cpu()
             condition_1024 = condition_1024.cpu()
             neg_condition_1024 = neg_condition_1024.cpu()
-            del shape_projector, shape_coeff, shape_coords_src, shape_coords_dst
-            del shape_rows_src, shape_rows_dst, shape_O, shape_t, shape_s, shape_view
+            del shape_projector, shape_coeff
+            del shape_rows_src, shape_rows_dst, shape_view
             torch.cuda.empty_cache()
 
         shape_decoder = self.loader.shape_decoder

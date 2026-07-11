@@ -17,13 +17,15 @@ from symtrellis.flow import (
     SymmetryProjectionGuidanceWrapper,
     SymmetryProjectionNoiseSampler,
 )
-from symtrellis.mapper import SymmetryProjector
+from symtrellis.mapper import SymmetryProjector, concat_coeff
 from symtrellis.symmetry import build_symmetry_relation_inputs, get_3d_point_group
 
 from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
 from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
 from .symmetry import ConfirmDetectedSymmetry, ConfirmManualSymmetry
 from .trellis2_vanilla_sparse_structure import OCC_COORDINATES, OCC_VISUALIZATION_MESH, SPARSE_STRUCTURE_LATENT
+
+SS_MAPPER_RELATION_CHUNK_SIZE = 4
 
 
 class Trellis2SymmetrySparseStructure(Operation):
@@ -113,9 +115,6 @@ class Trellis2SymmetrySparseStructure(Operation):
         condition = torch.load(inputs.paths["condition"], map_location="cpu")
 
         ss_flow_model = self.loader.ss_flow_model
-        ss_flow_model.to(DEVICE)
-        condition = condition.to(DEVICE)
-        neg_condition = torch.zeros_like(condition)
 
         batch_size = condition.shape[0]
         grid_size = ss_flow_model.resolution
@@ -128,29 +127,55 @@ class Trellis2SymmetrySparseStructure(Operation):
             minor_axis=symmetry_minor_axis,
             include_identity=False,
         )
-        relations = [(O_dst2src, t_dst2src, s_dst2src) for _ in range(batch_size)]
 
         ss_coords = trellis2_dense_grid_coords(
             batch_size=batch_size,
             grid_size=grid_size,
             device=DEVICE,
         )
-        ss_coords_src, ss_coords_dst, ss_rows_src, ss_rows_dst, ss_O, ss_t, ss_s = build_symmetry_relation_inputs(
-            coords=ss_coords,
-            relations=relations,
-            grid_size=grid_size,
-        )
-
         ss_mapper = self.loader.ss_mapper
         ss_mapper.to(DEVICE)
-        ss_coeff = ss_mapper(
-            coords_src=ss_coords_src,
-            coords_dst=ss_coords_dst,
-            O_dst2src=ss_O,
-            t_dst2src=ss_t,
-            s_dst2src=ss_s,
-        )
+
+        ss_coeff_chunks = []
+        ss_rows_src_chunks = []
+        ss_rows_dst_chunks = []
+
+        for relation_start in range(0, O_dst2src.shape[0], SS_MAPPER_RELATION_CHUNK_SIZE):
+            relation_end = relation_start + SS_MAPPER_RELATION_CHUNK_SIZE
+            chunk_relations = [
+                (
+                    O_dst2src[relation_start:relation_end],
+                    t_dst2src[relation_start:relation_end],
+                    s_dst2src[relation_start:relation_end],
+                )
+                for _ in range(batch_size)
+            ]
+
+            ss_coords_src, ss_coords_dst, ss_rows_src_chunk, ss_rows_dst_chunk, ss_O, ss_t, ss_s = build_symmetry_relation_inputs(
+                coords=ss_coords,
+                relations=chunk_relations,
+                grid_size=grid_size,
+            )
+            ss_coeff_chunks.append(
+                ss_mapper(
+                    coords_src=ss_coords_src,
+                    coords_dst=ss_coords_dst,
+                    O_dst2src=ss_O,
+                    t_dst2src=ss_t,
+                    s_dst2src=ss_s,
+                )
+            )
+            ss_rows_src_chunks.append(ss_rows_src_chunk)
+            ss_rows_dst_chunks.append(ss_rows_dst_chunk)
+            del ss_coords_src, ss_coords_dst, ss_O, ss_t, ss_s
+            del ss_rows_src_chunk, ss_rows_dst_chunk, chunk_relations
+
         ss_mapper.cpu()
+        torch.cuda.empty_cache()
+
+        ss_coeff = concat_coeff(ss_coeff_chunks)
+        ss_rows_src = torch.cat(ss_rows_src_chunks)
+        ss_rows_dst = torch.cat(ss_rows_dst_chunks)
 
         ss_projector = SymmetryProjector(
             num_rows=ss_coords.shape[0],
@@ -163,6 +188,10 @@ class Trellis2SymmetrySparseStructure(Operation):
             grid_size=grid_size,
             batch_size=batch_size,
         )
+
+        ss_flow_model.to(DEVICE)
+        condition = condition.to(DEVICE)
+        neg_condition = torch.zeros_like(condition)
 
         noise_sampler = SymmetryProjectionNoiseSampler(
             sampler=TRELLIS2SparseStructureLatentNoiseSampler(),
@@ -226,8 +255,9 @@ class Trellis2SymmetrySparseStructure(Operation):
         ss_flow_model.cpu()
         condition = condition.cpu()
         neg_condition = neg_condition.cpu()
-        del ss_projector, ss_coeff, ss_coords, ss_coords_src, ss_coords_dst
-        del ss_rows_src, ss_rows_dst, ss_O, ss_t, ss_s, ss_view
+        del ss_projector, ss_coeff, ss_coeff_chunks, ss_coords
+        del ss_rows_src, ss_rows_dst, ss_rows_src_chunks, ss_rows_dst_chunks
+        del ss_view
         del O_dst2src, t_dst2src, s_dst2src
         torch.cuda.empty_cache()
 

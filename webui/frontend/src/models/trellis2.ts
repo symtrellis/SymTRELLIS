@@ -98,7 +98,6 @@ export const trellis2OutputRoleCandidates = {
 };
 
 const cfgDuration: DurationRange = [0, 0.4];
-const symmetryProjectionDuration: DurationRange = [0, 0.3];
 
 const commonGenerationDefaults: CommonGenerationParams = {
   cfgDuration,
@@ -106,13 +105,19 @@ const commonGenerationDefaults: CommonGenerationParams = {
   cfgStrength: 7.5,
   seed: 42,
   steps: 12,
-  timeStepRescale: 0.5,
+  timeStepRescale: 5.0,
 };
 
-const symmetryProjectionDefaults: SymmetryProjectionParams = {
+const symmetrySparseStructureProjectionDefaults: SymmetryProjectionParams = {
   noiseSymmetryProjectionStrength: 0.2,
-  symmetryProjectionDuration,
-  symmetryProjectionStrength: 0.9,
+  symmetryProjectionDuration: [0, 0.3],
+  symmetryProjectionStrength: 1.0,
+};
+
+const symmetryShapeProjectionDefaults: SymmetryProjectionParams = {
+  noiseSymmetryProjectionStrength: 0.2,
+  symmetryProjectionDuration: [0, 0.3],
+  symmetryProjectionStrength: 0.3,
 };
 
 const shapeDefaults: Trellis2ShapeParams = {
@@ -131,16 +136,16 @@ export const trellis2ExportDefaults: Trellis2ExportParams = {
 export const trellis2GenerationDefaults = {
   symmetryShape: {
     ...commonGenerationDefaults,
-    ...symmetryProjectionDefaults,
+    ...symmetryShapeProjectionDefaults,
     ...shapeDefaults,
     cfgRescale: 0.5,
-    noiseSymmetryProjectionStrength: 0.2,
+    steps: 32,
     timeStepRescale: 3,
   } satisfies Trellis2SymmetryShapeParams,
   symmetrySparseStructure: {
     ...commonGenerationDefaults,
-    ...symmetryProjectionDefaults,
-    noiseSymmetryProjectionStrength: 0.4,
+    ...symmetrySparseStructureProjectionDefaults,
+    steps: 32,
   } satisfies Trellis2SymmetrySparseStructureParams,
   texture: {
     ...commonGenerationDefaults,
