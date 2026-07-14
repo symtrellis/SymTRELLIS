@@ -32,7 +32,7 @@ XFORMERS_VERSION="${XFORMERS_VERSION:-}"
 KAOLIN_FIND_LINKS="${KAOLIN_FIND_LINKS:-}"
 KAOLIN_INSTALL_MODE="${KAOLIN_INSTALL_MODE:-auto}"
 KAOLIN_REPO="${KAOLIN_REPO:-NVIDIAGameWorks/kaolin}"
-KAOLIN_REF="${KAOLIN_REF:-v0.18.0}"
+KAOLIN_REF="${KAOLIN_REF:-ad43ffd3ed9bb11fb4acc29e5b848712cdb53ce1}"
 KAOLIN_RESOLVED_INSTALL_MODE=""
 TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-}"
 FLASH_ATTN_CUDA_KEY=""
@@ -73,7 +73,7 @@ PURE_PYTHON_IMPORTS=(
     huggingface_hub transformers safetensors easydict tensorboard lpips
     rembg onnxruntime open_clip objaverse astor optree roma point_cloud_utils
     seaborn gradio matplotlib plotly kornia timm zstandard einops iopath
-    skimage plyfile pygltflib ipycanvas ipyevents pxr warp cairo utils3d moge
+    skimage plyfile pygltflib ipycanvas ipyevents pxr warp utils3d moge
     fastapi uvicorn multipart
 )
 
@@ -132,7 +132,7 @@ Environment overrides:
   KAOLIN_FIND_LINKS       Override the NVIDIA kaolin wheel index URL.
   KAOLIN_INSTALL_MODE     auto, wheel, or source. Default: auto.
   KAOLIN_REPO             Kaolin GitHub repository. Default: NVIDIAGameWorks/kaolin.
-  KAOLIN_REF              Kaolin source fallback ref. Default: v0.18.0.
+  KAOLIN_REF              Kaolin source fallback ref. Default: ad43ffd3ed9bb11fb4acc29e5b848712cdb53ce1.
   TORCH_CUDA_ARCH_LIST    Override the generated CUDA architecture list.
 
 Generated Docker build args:
@@ -991,11 +991,17 @@ RUN python -m pip install --no-cache-dir --only-binary=:all: --no-index --no-dep
 EOF
         emit_clean
     else
-        emit_git_build_stage \
-            7 \
-            "kaolin source build from ${KAOLIN_REPO}@${KAOLIN_REF}" \
-            "git clone --depth 1 --branch ${KAOLIN_REF} https://github.com/${KAOLIN_REPO}.git /tmp/extensions/kaolin" \
-            /tmp/extensions/kaolin
+        cat <<EOF
+# Stage 7: kaolin source build from ${KAOLIN_REPO}@${KAOLIN_REF}.
+EOF
+        emit_build_env
+        cat <<EOF
+ && python -m pip install --no-cache-dir --force-reinstall --ignore-installed "setuptools==75.8.2" wheel packaging \\
+ && git clone https://github.com/${KAOLIN_REPO}.git /tmp/extensions/kaolin \\
+ && git -C /tmp/extensions/kaolin checkout ${KAOLIN_REF} \\
+ && python -m pip install --no-cache-dir /tmp/extensions/kaolin --no-build-isolation \\
+EOF
+        emit_ext_clean
     fi
 }
 
@@ -1032,6 +1038,7 @@ RUN --mount=type=bind,source=.,target=/mnt/repo,ro \
  && git checkout --detach "${SYMTRELLIS_REF}" \
  && git submodule update --init --recursive \
  && python -m pip install --no-cache-dir . --no-build-isolation \
+ && rm -rf /workspace/SymTRELLIS/symtrellis \
  && (python -m pip cache purge || true) \
  && rm -rf /root/.cache/pip /root/.cache/torch_extensions /tmp/* /var/tmp/*
 
@@ -1115,7 +1122,7 @@ render_dockerfile() {
         emit_pure_python_stage
         emit_cuda_wheel_stage
         emit_flash_attn_stage
-        emit_pip_build_stage 6 pytorch3d '"pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git@75ebeeaea0908c5527e7b1e305fbc7681382db47"'
+        emit_pip_build_stage 6 pytorch3d '"pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git@f5f6b78e70e0a1b70f3be9a09b5b001e9b3a7a03"'
         emit_kaolin_stage
         emit_pip_build_stage 8 gsplat '"gsplat @ git+https://github.com/nerfstudio-project/gsplat.git@2323de5905d5e90e035f792fe65bad0fedd413e7"'
         emit_git_build_stage 9 nvdiffrast "git clone -b v0.4.0 https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast" /tmp/extensions/nvdiffrast
