@@ -917,7 +917,7 @@ class Storage:
 
     def read_session_restore_snapshot(self, session_id: str) -> dict[str, Any]:
         connection = sqlite3.connect(self.database_path)
-        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("BEGIN")
         try:
             row = connection.execute(
                 """
