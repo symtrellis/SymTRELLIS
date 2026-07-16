@@ -279,7 +279,7 @@ class Storage:
             UPDATE session_tasks
             SET state = 'failed', updated_at = ?
             WHERE runtime_id != ?
-              AND state IN ('running', 'committing')
+              AND state IN ('prepared', 'queued', 'running', 'committing')
             """,
             (now, runtime_id),
         )
@@ -333,11 +333,7 @@ class Storage:
                 """,
                 (session_id,),
             ).fetchone()
-            if (
-                session_row is None
-                or session_row[0] != "active"
-                or session_row[1] > stale_before
-            ):
+            if session_row is None or session_row[0] != "active" or session_row[1] > stale_before:
                 connection.rollback()
                 connection.close()
                 continue
@@ -401,7 +397,7 @@ class Storage:
                     (session_id,),
                 ).fetchall()
             ]
-            for attempt_id, in connection.execute(
+            for (attempt_id,) in connection.execute(
                 """
                 SELECT attempt_id
                 FROM session_tasks
@@ -542,7 +538,7 @@ class Storage:
         upload_paths: set[Path] = set()
         connection = sqlite3.connect(self.database_path)
         connection.execute("BEGIN IMMEDIATE")
-        for attempt_id, in connection.execute(
+        for (attempt_id,) in connection.execute(
             """
             SELECT attempt_id
             FROM session_tasks
@@ -649,18 +645,9 @@ class Storage:
                 """,
             ).fetchall()
         }
-        node_run_keys = {
-            row[0]
-            for row in connection.execute("SELECT node_run_key FROM node_runs").fetchall()
-        }
-        action_keys = {
-            row[0]
-            for row in connection.execute("SELECT action_key FROM actions").fetchall()
-        }
-        blob_paths = {
-            Path(row[0])
-            for row in connection.execute("SELECT path FROM upload_blobs").fetchall()
-        }
+        node_run_keys = {row[0] for row in connection.execute("SELECT node_run_key FROM node_runs").fetchall()}
+        action_keys = {row[0] for row in connection.execute("SELECT action_key FROM actions").fetchall()}
+        blob_paths = {Path(row[0]) for row in connection.execute("SELECT path FROM upload_blobs").fetchall()}
         connection.commit()
         connection.close()
 
@@ -671,11 +658,7 @@ class Storage:
             path.unlink(missing_ok=True)
 
         for path in self.attempts_dir.iterdir():
-            if (
-                path.is_dir()
-                and path.name not in active_attempt_ids
-                and path.stat().st_mtime <= stale_before
-            ):
+            if path.is_dir() and path.name not in active_attempt_ids and path.stat().st_mtime <= stale_before:
                 shutil.rmtree(path)
 
         for execution_kind, record_keys in (
@@ -685,11 +668,7 @@ class Storage:
             parent = self.outputs_dir / execution_kind
             if parent.exists():
                 for path in parent.iterdir():
-                    if (
-                        path.is_dir()
-                        and path.name not in record_keys
-                        and path.stat().st_mtime <= stale_before
-                    ):
+                    if path.is_dir() and path.name not in record_keys and path.stat().st_mtime <= stale_before:
                         shutil.rmtree(path)
 
         for path in self.bundles_dir.iterdir():
@@ -935,6 +914,79 @@ class Storage:
             "last_activity_at": row[6],
             "expired_at": row[7],
         }
+
+    def read_session_restore_snapshot(self, session_id: str) -> dict[str, Any]:
+        connection = sqlite3.connect(self.database_path)
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = connection.execute(
+                """
+                SELECT
+                    session_id,
+                    model_id,
+                    revision,
+                    active_run_keys_json,
+                    actions_by_source_json,
+                    status,
+                    last_activity_at,
+                    expired_at
+                FROM sessions
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+
+            if row is None:
+                snapshot = {"status": "not_found"}
+            elif row[5] == "expired":
+                snapshot = {"status": "session_expired"}
+            else:
+                session = {
+                    "session_id": row[0],
+                    "model_id": row[1],
+                    "revision": row[2],
+                    "active_run_keys": json.loads(row[3]),
+                    "actions_by_source": json.loads(row[4]),
+                    "status": row[5],
+                    "last_activity_at": row[6],
+                    "expired_at": row[7],
+                }
+                node_runs_by_key = {}
+                for node_run_key in session["active_run_keys"]:
+                    record_json = connection.execute(
+                        """
+                        SELECT record_json
+                        FROM node_runs
+                        WHERE node_run_key = ?
+                        """,
+                        (node_run_key,),
+                    ).fetchone()[0]
+                    node_runs_by_key[node_run_key] = json.loads(record_json)
+
+                actions_by_key = {}
+                for action_keys in session["actions_by_source"].values():
+                    for action_key in action_keys:
+                        record_json = connection.execute(
+                            """
+                            SELECT record_json
+                            FROM actions
+                            WHERE action_key = ?
+                            """,
+                            (action_key,),
+                        ).fetchone()[0]
+                        actions_by_key[action_key] = json.loads(record_json)
+
+                snapshot = {
+                    "status": "active",
+                    "session": session,
+                    "node_runs_by_key": node_runs_by_key,
+                    "actions_by_key": actions_by_key,
+                }
+
+            connection.commit()
+            return snapshot
+        finally:
+            connection.close()
 
     def begin_session_task(
         self,

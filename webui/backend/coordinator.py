@@ -369,12 +369,13 @@ class Coordinator:
         session_id: str,
         key: str | None = None,
     ) -> dict[str, Any]:
-        session = self.storage.read_session(session_id)
-        if session is None:
+        snapshot = self.storage.read_session_restore_snapshot(session_id)
+        if snapshot["status"] == "not_found":
             return {"status": "not_found"}
-        if session["status"] == "expired":
+        if snapshot["status"] == "session_expired":
             return {"status": "session_expired"}
 
+        session = snapshot["session"]
         if key is None:
             active_run_keys = session["active_run_keys"]
         else:
@@ -385,20 +386,19 @@ class Coordinator:
 
         node_runs = []
         for run_key in active_run_keys:
-            run = self.storage.read_node_run(run_key)
-            if run is not None:
-                node_runs.append(
-                    {
-                        **run,
-                        "outputs": {
-                            role: {
-                                "filename": output["filename"],
-                                "metadata": output["metadata"],
-                            }
-                            for role, output in run["outputs"].items()
-                        },
+            run = snapshot["node_runs_by_key"][run_key]
+            node_runs.append(
+                {
+                    **run,
+                    "outputs": {
+                        role: {
+                            "filename": output["filename"],
+                            "metadata": output["metadata"],
+                        }
+                        for role, output in run["outputs"].items()
                     },
-                )
+                },
+            )
 
         actions = {}
         for source_key, action_keys in session["actions_by_source"].items():
@@ -406,20 +406,19 @@ class Coordinator:
                 continue
             actions[source_key] = []
             for action_key in action_keys:
-                action = self.storage.read_action(action_key)
-                if action is not None:
-                    actions[source_key].append(
-                        {
-                            **action,
-                            "outputs": {
-                                role: {
-                                    "filename": output["filename"],
-                                    "metadata": output["metadata"],
-                                }
-                                for role, output in action["outputs"].items()
-                            },
+                action = snapshot["actions_by_key"][action_key]
+                actions[source_key].append(
+                    {
+                        **action,
+                        "outputs": {
+                            role: {
+                                "filename": output["filename"],
+                                "metadata": output["metadata"],
+                            }
+                            for role, output in action["outputs"].items()
                         },
-                    )
+                    },
+                )
 
         return {
             "status": "restored",
