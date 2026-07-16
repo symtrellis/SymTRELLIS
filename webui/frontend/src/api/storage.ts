@@ -25,8 +25,11 @@ export async function uploadInputImage(
   file: Blob | File,
   filename: string,
 ): Promise<ApiResult<UploadRef>> {
+  const mimeType = file.type || 'application/octet-stream';
   const result = await submitApi<BackendUploadResponse>('/upload', {
-    file: handle_file(new Blob([file], { type: file.type })),
+    file: handle_file(file),
+    filename,
+    mime_type: mimeType,
   });
   if (!result.ok) {
     return result;
@@ -36,7 +39,7 @@ export async function uploadInputImage(
     ok: true,
     value: {
       contentHash: result.value.content_hash,
-      filename,
+      filename: result.value.filename,
       mimeType: result.value.mime_type,
       uploadKey: result.value.upload_key as UploadKey,
     },

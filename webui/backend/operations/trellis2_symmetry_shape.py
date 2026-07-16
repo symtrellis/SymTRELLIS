@@ -153,53 +153,53 @@ class Trellis2SymmetryShape(Operation):
         )
 
         shape_mapper = self.runtime.shape_mapper
-        shape_mapper.to(DEVICE)
-
         shape_coeff_chunks = []
         shape_rows_src_chunks = []
         shape_rows_dst_chunks = []
 
         num_relation_chunks = (O_dst2src.shape[0] + SHAPE_MAPPER_RELATION_CHUNK_SIZE - 1) // SHAPE_MAPPER_RELATION_CHUNK_SIZE
         mapper_512_scale = 0.10 if mode == "512" else 0.08
-        progress(0.0, desc="shape_mapper_512")
-        for chunk_index, relation_start in enumerate(
-            range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE),
-        ):
-            relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
-            chunk_relations = [
-                (
-                    O_dst2src[relation_start:relation_end],
-                    t_dst2src[relation_start:relation_end],
-                    s_dst2src[relation_start:relation_end],
+        try:
+            shape_mapper.to(DEVICE)
+            progress(0.0, desc="shape_mapper_512")
+            for chunk_index, relation_start in enumerate(
+                range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE),
+            ):
+                relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
+                chunk_relations = [
+                    (
+                        O_dst2src[relation_start:relation_end],
+                        t_dst2src[relation_start:relation_end],
+                        s_dst2src[relation_start:relation_end],
+                    )
+                    for _ in range(condition_512.shape[0])
+                ]
+
+                shape_coords_src, shape_coords_dst, shape_rows_src_chunk, shape_rows_dst_chunk, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
+                    coords=occ_coordinates,
+                    relations=chunk_relations,
+                    grid_size=32,
                 )
-                for _ in range(condition_512.shape[0])
-            ]
-
-            shape_coords_src, shape_coords_dst, shape_rows_src_chunk, shape_rows_dst_chunk, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
-                coords=occ_coordinates,
-                relations=chunk_relations,
-                grid_size=32,
-            )
-            shape_coeff_chunk = shape_mapper(
-                coords_src=shape_coords_src,
-                coords_dst=shape_coords_dst,
-                O_dst2src=shape_O,
-                t_dst2src=shape_t,
-                s_dst2src=shape_s,
-            )
-            shape_coeff_chunks.append(shape_coeff_chunk.to(torch.device("cpu")))
-            shape_rows_src_chunks.append(shape_rows_src_chunk.cpu())
-            shape_rows_dst_chunks.append(shape_rows_dst_chunk.cpu())
-            del shape_coeff_chunk
-            del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
-            del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
-            progress(
-                mapper_512_scale * (chunk_index + 1) / num_relation_chunks,
-                desc="shape_mapper_512",
-            )
-
-        shape_mapper.cpu()
-        torch.cuda.empty_cache()
+                shape_coeff_chunk = shape_mapper(
+                    coords_src=shape_coords_src,
+                    coords_dst=shape_coords_dst,
+                    O_dst2src=shape_O,
+                    t_dst2src=shape_t,
+                    s_dst2src=shape_s,
+                )
+                shape_coeff_chunks.append(shape_coeff_chunk.to(torch.device("cpu")))
+                shape_rows_src_chunks.append(shape_rows_src_chunk.cpu())
+                shape_rows_dst_chunks.append(shape_rows_dst_chunk.cpu())
+                del shape_coeff_chunk
+                del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
+                del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
+                progress(
+                    mapper_512_scale * (chunk_index + 1) / num_relation_chunks,
+                    desc="shape_mapper_512",
+                )
+        finally:
+            shape_mapper.cpu()
+            torch.cuda.empty_cache()
 
         shape_coeff = concat_coeff(shape_coeff_chunks).to(torch.device(DEVICE))
         shape_rows_src = torch.cat(shape_rows_src_chunks).to(DEVICE)
@@ -217,186 +217,10 @@ class Trellis2SymmetryShape(Operation):
             sp_class=SparseTensor,
         )
 
-        shape_flow_model.to(DEVICE)
-        condition_512 = condition_512.to(DEVICE)
-        neg_condition_512 = torch.zeros_like(condition_512)
-
-        noise_sampler = SymmetryProjectionNoiseSampler(
-            sampler=TRELLIS2ShapeLatentNoiseSampler(),
-            symmetry_strength=noise_symmetry_projection_strength,
-        )
-        shape_noise = noise_sampler.sample(
-            sp_class=SparseTensor,
-            coords=occ_coordinates,
-            feat_dim=32,
-            grid_size=32,
-            seed=seed,
-            device=DEVICE,
-            projector=shape_projector,
-            to_sparse_view=shape_view.to_sparse_view,
-            to_original_view=shape_view.to_original_view,
-            self_include=True,
-        )
-
-        flow_predictor = TRELLIS2FlowPredictor(model=shape_flow_model)
-        cfg_predictor = ClassifierFreeGuidanceWrapper(
-            predictor=flow_predictor,
-            strength=cfg_strength,
-            interval=cfg_duration,
-            rescale=cfg_rescale,
-        )
-        spg_predictor = SymmetryProjectionGuidanceWrapper(
-            predictor=cfg_predictor,
-            strength=symmetry_projection_strength,
-            interval=symmetry_projection_duration,
-            symmetrize_target="x_start",
-            rescale=0.0,
-        )
-
-        flow_solver = EulerSolver()
-        shape_latent = shape_noise
-
-        flow_512_offset = 0.10 if mode == "512" else 0.08
-        flow_512_scale = 0.45 if mode == "512" else 0.17
-        for step in flow_solver.iter_steps(
-            noise=shape_noise,
-            predictor=spg_predictor,
-            steps=steps,
-            predictor_args={
-                "cond": condition_512,
-                "neg_cond": neg_condition_512,
-                "projector": shape_projector,
-                "to_sparse_view": shape_view.to_sparse_view,
-                "to_original_view": shape_view.to_original_view,
-                "self_include": True,
-            },
-            sigma_min=1e-5,
-            rescale_t=time_step_rescale,
-        ):
-            shape_latent = step.x_t
-            progress(
-                flow_512_offset + flow_512_scale * float(step.t),
-                desc="shape_flow_512",
-            )
-
-        shape_latent = shape_latent.replace(
-            trellis2_shape_latent_to_sparse_view(shape_latent),
-        )
-
-        shape_latent = shape_latent.cpu()
-        shape_flow_model.cpu()
-        del shape_projector, shape_coeff
-        del shape_rows_src, shape_rows_dst, shape_view, occ_coordinates
-        del condition_512, neg_condition_512, noise_sampler, shape_noise
-        del flow_predictor, cfg_predictor, spg_predictor, flow_solver, step
-        torch.cuda.empty_cache()
-
-        if mode == "512":
-            shape_latent_grid_size = 32
-            shape_grid_size = 512
-        else:
-            condition_1024 = torch.load(inputs.paths["image_condition_1024"], map_location="cpu")
-
-            shape_decoder = self.runtime.shape_decoder
-            shape_decoder.to(DEVICE)
-
-            shape_latent = shape_latent.to(DEVICE)
-            hr_coords = shape_decoder.upsample(shape_latent, upsample_times=4)
-
-            hr_coords = hr_coords.cpu()
-            shape_latent = shape_latent.cpu()
-            shape_decoder.cpu()
-            torch.cuda.empty_cache()
-            progress(0.30, desc="shape_upsample")
-
-            cascade_coordinates = hr_coords
-            shape_latent_grid_size = 64
-            shape_grid_size = 1024
-
-            for candidate_shape_latent_grid_size in (96, 88, 80, 72, 64):
-                quantized_coordinates = torch.cat(
-                    [
-                        hr_coords[:, :1],
-                        ((hr_coords[:, 1:] + 0.5) / 512 * candidate_shape_latent_grid_size).int(),
-                    ],
-                    dim=1,
-                )
-                candidate_coordinates = quantized_coordinates.unique(dim=0)
-
-                if candidate_coordinates.shape[0] < max_tokens or candidate_shape_latent_grid_size == 64:
-                    cascade_coordinates = candidate_coordinates
-                    shape_latent_grid_size = candidate_shape_latent_grid_size
-                    shape_grid_size = candidate_shape_latent_grid_size * 16
-                    break
-
-            shape_mapper = self.runtime.shape_mapper
-            shape_mapper.to(DEVICE)
-            cascade_coordinates = cascade_coordinates.to(DEVICE)
-
-            shape_coeff_chunks = []
-            shape_rows_src_chunks = []
-            shape_rows_dst_chunks = []
-
-            progress(0.30, desc="shape_mapper_1024")
-            for chunk_index, relation_start in enumerate(
-                range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE),
-            ):
-                relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
-                chunk_relations = [
-                    (
-                        O_dst2src[relation_start:relation_end],
-                        t_dst2src[relation_start:relation_end],
-                        s_dst2src[relation_start:relation_end],
-                    )
-                    for _ in range(condition_1024.shape[0])
-                ]
-
-                shape_coords_src, shape_coords_dst, shape_rows_src_chunk, shape_rows_dst_chunk, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
-                    coords=cascade_coordinates,
-                    relations=chunk_relations,
-                    grid_size=shape_latent_grid_size,
-                )
-                shape_coeff_chunk = shape_mapper(
-                    coords_src=shape_coords_src,
-                    coords_dst=shape_coords_dst,
-                    O_dst2src=shape_O,
-                    t_dst2src=shape_t,
-                    s_dst2src=shape_s,
-                )
-                shape_coeff_chunks.append(shape_coeff_chunk.to(torch.device("cpu")))
-                shape_rows_src_chunks.append(shape_rows_src_chunk.cpu())
-                shape_rows_dst_chunks.append(shape_rows_dst_chunk.cpu())
-                del shape_coeff_chunk
-                del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
-                del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
-                progress(
-                    0.30 + 0.08 * (chunk_index + 1) / num_relation_chunks,
-                    desc="shape_mapper_1024",
-                )
-
-            shape_mapper.cpu()
-            torch.cuda.empty_cache()
-
-            shape_coeff = concat_coeff(shape_coeff_chunks).to(torch.device(DEVICE))
-            shape_rows_src = torch.cat(shape_rows_src_chunks).to(DEVICE)
-            shape_rows_dst = torch.cat(shape_rows_dst_chunks).to(DEVICE)
-            del shape_coeff_chunks, shape_rows_src_chunks, shape_rows_dst_chunks
-
-            shape_projector = SymmetryProjector(
-                num_rows=cascade_coordinates.shape[0],
-                rows_src=shape_rows_src,
-                rows_dst=shape_rows_dst,
-                coeff=shape_coeff,
-            )
-            shape_view = TRELLIS2ShapeLatentView(
-                coords=cascade_coordinates,
-                sp_class=SparseTensor,
-            )
-
-            shape_flow_model = self.runtime.shape_flow_model_1024
+        try:
             shape_flow_model.to(DEVICE)
-            condition_1024 = condition_1024.to(DEVICE)
-            neg_condition_1024 = torch.zeros_like(condition_1024)
+            condition_512 = condition_512.to(DEVICE)
+            neg_condition_512 = torch.zeros_like(condition_512)
 
             noise_sampler = SymmetryProjectionNoiseSampler(
                 sampler=TRELLIS2ShapeLatentNoiseSampler(),
@@ -404,9 +228,9 @@ class Trellis2SymmetryShape(Operation):
             )
             shape_noise = noise_sampler.sample(
                 sp_class=SparseTensor,
-                coords=cascade_coordinates,
+                coords=occ_coordinates,
                 feat_dim=32,
-                grid_size=shape_latent_grid_size,
+                grid_size=32,
                 seed=seed,
                 device=DEVICE,
                 projector=shape_projector,
@@ -431,15 +255,17 @@ class Trellis2SymmetryShape(Operation):
             )
 
             flow_solver = EulerSolver()
-            normalized_shape_latent = shape_noise
+            shape_latent = shape_noise
 
+            flow_512_offset = 0.10 if mode == "512" else 0.08
+            flow_512_scale = 0.45 if mode == "512" else 0.17
             for step in flow_solver.iter_steps(
                 noise=shape_noise,
                 predictor=spg_predictor,
                 steps=steps,
                 predictor_args={
-                    "cond": condition_1024,
-                    "neg_cond": neg_condition_1024,
+                    "cond": condition_512,
+                    "neg_cond": neg_condition_512,
                     "projector": shape_projector,
                     "to_sparse_view": shape_view.to_sparse_view,
                     "to_original_view": shape_view.to_original_view,
@@ -448,24 +274,205 @@ class Trellis2SymmetryShape(Operation):
                 sigma_min=1e-5,
                 rescale_t=time_step_rescale,
             ):
-                normalized_shape_latent = step.x_t
+                shape_latent = step.x_t
                 progress(
-                    0.38 + 0.22 * float(step.t),
-                    desc="shape_flow_1024",
+                    flow_512_offset + flow_512_scale * float(step.t),
+                    desc="shape_flow_512",
                 )
 
-            shape_latent = SparseTensor(
-                feats=trellis2_shape_latent_to_sparse_view(normalized_shape_latent),
-                coords=normalized_shape_latent.coords,
+            shape_latent = shape_latent.replace(
+                trellis2_shape_latent_to_sparse_view(shape_latent),
             )
 
             shape_latent = shape_latent.cpu()
-            shape_flow_model.cpu()
             del shape_projector, shape_coeff
-            del shape_rows_src, shape_rows_dst, shape_view, cascade_coordinates, hr_coords
-            del condition_1024, neg_condition_1024, noise_sampler, shape_noise
-            del normalized_shape_latent, flow_predictor, cfg_predictor, spg_predictor, flow_solver, step
+            del shape_rows_src, shape_rows_dst, shape_view, occ_coordinates
+            del condition_512, neg_condition_512, noise_sampler, shape_noise
+            del flow_predictor, cfg_predictor, spg_predictor, flow_solver, step
+        finally:
+            shape_flow_model.cpu()
             torch.cuda.empty_cache()
+
+        if mode == "512":
+            shape_latent_grid_size = 32
+            shape_grid_size = 512
+        else:
+            condition_1024 = torch.load(inputs.paths["image_condition_1024"], map_location="cpu")
+
+            shape_decoder = self.runtime.shape_decoder
+            try:
+                shape_decoder.to(DEVICE)
+
+                shape_latent = shape_latent.to(DEVICE)
+                hr_coords = shape_decoder.upsample(shape_latent, upsample_times=4)
+
+                hr_coords = hr_coords.cpu()
+                shape_latent = shape_latent.cpu()
+            finally:
+                shape_decoder.cpu()
+                torch.cuda.empty_cache()
+            progress(0.30, desc="shape_upsample")
+
+            cascade_coordinates = hr_coords
+            shape_latent_grid_size = 64
+            shape_grid_size = 1024
+
+            for candidate_shape_latent_grid_size in (96, 88, 80, 72, 64):
+                quantized_coordinates = torch.cat(
+                    [
+                        hr_coords[:, :1],
+                        ((hr_coords[:, 1:] + 0.5) / 512 * candidate_shape_latent_grid_size).int(),
+                    ],
+                    dim=1,
+                )
+                candidate_coordinates = quantized_coordinates.unique(dim=0)
+
+                if candidate_coordinates.shape[0] < max_tokens or candidate_shape_latent_grid_size == 64:
+                    cascade_coordinates = candidate_coordinates
+                    shape_latent_grid_size = candidate_shape_latent_grid_size
+                    shape_grid_size = candidate_shape_latent_grid_size * 16
+                    break
+
+            shape_mapper = self.runtime.shape_mapper
+            shape_coeff_chunks = []
+            shape_rows_src_chunks = []
+            shape_rows_dst_chunks = []
+
+            try:
+                shape_mapper.to(DEVICE)
+                cascade_coordinates = cascade_coordinates.to(DEVICE)
+
+                progress(0.30, desc="shape_mapper_1024")
+                for chunk_index, relation_start in enumerate(
+                    range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE),
+                ):
+                    relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
+                    chunk_relations = [
+                        (
+                            O_dst2src[relation_start:relation_end],
+                            t_dst2src[relation_start:relation_end],
+                            s_dst2src[relation_start:relation_end],
+                        )
+                        for _ in range(condition_1024.shape[0])
+                    ]
+
+                    shape_coords_src, shape_coords_dst, shape_rows_src_chunk, shape_rows_dst_chunk, shape_O, shape_t, shape_s = build_symmetry_relation_inputs(
+                        coords=cascade_coordinates,
+                        relations=chunk_relations,
+                        grid_size=shape_latent_grid_size,
+                    )
+                    shape_coeff_chunk = shape_mapper(
+                        coords_src=shape_coords_src,
+                        coords_dst=shape_coords_dst,
+                        O_dst2src=shape_O,
+                        t_dst2src=shape_t,
+                        s_dst2src=shape_s,
+                    )
+                    shape_coeff_chunks.append(shape_coeff_chunk.to(torch.device("cpu")))
+                    shape_rows_src_chunks.append(shape_rows_src_chunk.cpu())
+                    shape_rows_dst_chunks.append(shape_rows_dst_chunk.cpu())
+                    del shape_coeff_chunk
+                    del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
+                    del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
+                    progress(
+                        0.30 + 0.08 * (chunk_index + 1) / num_relation_chunks,
+                        desc="shape_mapper_1024",
+                    )
+            finally:
+                shape_mapper.cpu()
+                torch.cuda.empty_cache()
+
+            shape_coeff = concat_coeff(shape_coeff_chunks).to(torch.device(DEVICE))
+            shape_rows_src = torch.cat(shape_rows_src_chunks).to(DEVICE)
+            shape_rows_dst = torch.cat(shape_rows_dst_chunks).to(DEVICE)
+            del shape_coeff_chunks, shape_rows_src_chunks, shape_rows_dst_chunks
+
+            shape_projector = SymmetryProjector(
+                num_rows=cascade_coordinates.shape[0],
+                rows_src=shape_rows_src,
+                rows_dst=shape_rows_dst,
+                coeff=shape_coeff,
+            )
+            shape_view = TRELLIS2ShapeLatentView(
+                coords=cascade_coordinates,
+                sp_class=SparseTensor,
+            )
+
+            shape_flow_model = self.runtime.shape_flow_model_1024
+            try:
+                shape_flow_model.to(DEVICE)
+                condition_1024 = condition_1024.to(DEVICE)
+                neg_condition_1024 = torch.zeros_like(condition_1024)
+
+                noise_sampler = SymmetryProjectionNoiseSampler(
+                    sampler=TRELLIS2ShapeLatentNoiseSampler(),
+                    symmetry_strength=noise_symmetry_projection_strength,
+                )
+                shape_noise = noise_sampler.sample(
+                    sp_class=SparseTensor,
+                    coords=cascade_coordinates,
+                    feat_dim=32,
+                    grid_size=shape_latent_grid_size,
+                    seed=seed,
+                    device=DEVICE,
+                    projector=shape_projector,
+                    to_sparse_view=shape_view.to_sparse_view,
+                    to_original_view=shape_view.to_original_view,
+                    self_include=True,
+                )
+
+                flow_predictor = TRELLIS2FlowPredictor(model=shape_flow_model)
+                cfg_predictor = ClassifierFreeGuidanceWrapper(
+                    predictor=flow_predictor,
+                    strength=cfg_strength,
+                    interval=cfg_duration,
+                    rescale=cfg_rescale,
+                )
+                spg_predictor = SymmetryProjectionGuidanceWrapper(
+                    predictor=cfg_predictor,
+                    strength=symmetry_projection_strength,
+                    interval=symmetry_projection_duration,
+                    symmetrize_target="x_start",
+                    rescale=0.0,
+                )
+
+                flow_solver = EulerSolver()
+                normalized_shape_latent = shape_noise
+
+                for step in flow_solver.iter_steps(
+                    noise=shape_noise,
+                    predictor=spg_predictor,
+                    steps=steps,
+                    predictor_args={
+                        "cond": condition_1024,
+                        "neg_cond": neg_condition_1024,
+                        "projector": shape_projector,
+                        "to_sparse_view": shape_view.to_sparse_view,
+                        "to_original_view": shape_view.to_original_view,
+                        "self_include": True,
+                    },
+                    sigma_min=1e-5,
+                    rescale_t=time_step_rescale,
+                ):
+                    normalized_shape_latent = step.x_t
+                    progress(
+                        0.38 + 0.22 * float(step.t),
+                        desc="shape_flow_1024",
+                    )
+
+                shape_latent = SparseTensor(
+                    feats=trellis2_shape_latent_to_sparse_view(normalized_shape_latent),
+                    coords=normalized_shape_latent.coords,
+                )
+
+                shape_latent = shape_latent.cpu()
+                del shape_projector, shape_coeff
+                del shape_rows_src, shape_rows_dst, shape_view, cascade_coordinates, hr_coords
+                del condition_1024, neg_condition_1024, noise_sampler, shape_noise
+                del normalized_shape_latent, flow_predictor, cfg_predictor, spg_predictor, flow_solver, step
+            finally:
+                shape_flow_model.cpu()
+                torch.cuda.empty_cache()
 
         del O_dst2src, t_dst2src, s_dst2src
         del symmetry_center, symmetry_major_axis, symmetry_minor_axis
@@ -473,20 +480,22 @@ class Trellis2SymmetryShape(Operation):
 
         shape_decoder = self.runtime.shape_decoder
         shape_decoder.set_resolution(shape_grid_size)
-        shape_decoder.to(DEVICE)
+        try:
+            shape_decoder.to(DEVICE)
 
-        shape_latent = shape_latent.to(DEVICE)
-        progress(0.55 if mode == "512" else 0.60, desc="shape_decode")
-        shape_meshes, shape_subs = shape_decoder(shape_latent, return_subs=True)
-        shape_mesh = shape_meshes[0].cpu()
-        shape_subs = [sub.cpu() for sub in shape_subs]
+            shape_latent = shape_latent.to(DEVICE)
+            progress(0.55 if mode == "512" else 0.60, desc="shape_decode")
+            shape_meshes, shape_subs = shape_decoder(shape_latent, return_subs=True)
+            shape_mesh = shape_meshes[0].cpu()
+            shape_subs = [sub.cpu() for sub in shape_subs]
 
-        shape_latent = shape_latent.cpu()
-        shape_raw_mesh_vertices = shape_mesh.vertices.contiguous()
-        shape_raw_mesh_faces = shape_mesh.faces.contiguous()
-        shape_decoder.cpu()
-        del shape_meshes
-        torch.cuda.empty_cache()
+            shape_latent = shape_latent.cpu()
+            shape_raw_mesh_vertices = shape_mesh.vertices.contiguous()
+            shape_raw_mesh_faces = shape_mesh.faces.contiguous()
+            del shape_meshes
+        finally:
+            shape_decoder.cpu()
+            torch.cuda.empty_cache()
         progress(0.70, desc="shape_decode")
 
         shape_latent_path = context.work_dir / "shape_latent.pt"

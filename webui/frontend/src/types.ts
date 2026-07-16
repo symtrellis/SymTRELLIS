@@ -12,6 +12,8 @@ export type ActionKey = string;
 
 export type RequestId = string;
 
+export type TaskId = string;
+
 export type SessionId = string;
 
 export type SessionRevision = number;

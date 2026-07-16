@@ -14,7 +14,6 @@ class OperationInputs:
 
 @dataclass
 class OperationContext:
-    request_id: str
     key: str
     work_dir: Path
 

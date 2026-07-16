@@ -42,6 +42,9 @@ export type ImageConditionAction =
     }
   | {
       type: 'resetToNodeStart';
+    }
+  | {
+      type: 'resetSession';
     };
 
 export function createInitialImageConditionState(): ImageConditionState {
@@ -122,6 +125,9 @@ export function imageConditionReducer(
         status: 'idle',
         upload: null,
       };
+
+    case 'resetSession':
+      return createInitialImageConditionState();
   }
 }
 

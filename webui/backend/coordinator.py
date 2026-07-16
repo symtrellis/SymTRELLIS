@@ -1,15 +1,16 @@
 import hashlib
 import json
-import shutil
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 from .operations import Operation, OperationContext, OperationInputs, OperationResult
+from .storage import SessionExpiredError
 
 
 @dataclass
 class ExecutionRequest:
-    request_id: str
     execution_kind: str
     operation_id: str
     model_id: str | None
@@ -19,6 +20,16 @@ class ExecutionRequest:
     input_upload_keys: list[str]
     source_node_run_key: str | None
     params: dict[str, Any]
+
+
+@dataclass
+class GpuExecutionInput:
+    operation_id: str
+    inputs: OperationInputs
+    params: dict[str, Any]
+    key: str
+    attempt_id: str
+    work_dir: Path
 
 
 @dataclass
@@ -32,11 +43,23 @@ class PreparedExecution:
 
 
 class Coordinator:
-    def __init__(self, storage: Any, operations: dict[str, Operation]):
+    def __init__(
+        self,
+        storage: Any,
+        operations: dict[str, Operation],
+        runtime_id: str,
+        prepared_reservation_seconds: int,
+    ):
         self.storage = storage
         self.operations = operations
+        self.runtime_id = runtime_id
+        self.prepared_reservation_seconds = prepared_reservation_seconds
 
-    def _resolve(self, request: ExecutionRequest) -> PreparedExecution:
+    def _resolve(
+        self,
+        request: ExecutionRequest,
+        session: dict[str, Any],
+    ) -> PreparedExecution:
         operation = self.operations.get(request.operation_id)
         if operation is None:
             raise ValueError(f"Unknown operation_id: {request.operation_id}")
@@ -45,17 +68,10 @@ class Coordinator:
                 f"Operation {operation.operation_id} expects {operation.execution_kind}, " f"got {request.execution_kind}",
             )
 
-        if operation.creates_session and request.session_id is None:
-            if request.session_revision != 0:
-                raise ValueError("A new session must start at revision 0")
-            session = self.storage.create_session(request.model_id)
-        else:
-            if request.session_id is None:
-                raise ValueError(f"Operation {operation.operation_id} requires session_id")
-            session = self.storage.read_session(request.session_id)
-            if session is None:
-                raise ValueError(f"Session not found: {request.session_id}")
-
+        if request.session_id != session["session_id"]:
+            raise ValueError(f"Task session mismatch: {session['session_id']}")
+        if session["status"] != "active":
+            raise SessionExpiredError(f"Session expired: {session['session_id']}")
         if request.session_revision != session["revision"]:
             raise ValueError(f"Session revision conflict: {session['session_id']}")
         if request.model_id != session["model_id"]:
@@ -98,60 +114,117 @@ class Coordinator:
         )
 
     def prepare(self, request: ExecutionRequest) -> dict[str, Any]:
-        prepared = self._resolve(request)
+        operation = self.operations.get(request.operation_id)
+        if operation is None:
+            raise ValueError(f"Unknown operation_id: {request.operation_id}")
+        if operation.execution_kind != request.execution_kind:
+            raise ValueError(
+                f"Operation {operation.operation_id} expects {operation.execution_kind}, " f"got {request.execution_kind}",
+            )
 
-        if prepared.cached_record is not None:
+        task, session = self.storage.begin_session_task(
+            request=asdict(request),
+            creates_session=operation.creates_session,
+            runtime_id=self.runtime_id,
+            prepared_reservation_seconds=self.prepared_reservation_seconds,
+        )
+        task_id = task["task_id"]
+
+        try:
+            stored_request = ExecutionRequest(**task["request"])
+            prepared = self._resolve(stored_request, session)
+
+            if prepared.cached_record is not None:
+                self.storage.mark_task_committing(task_id)
+                return {
+                    "status": "completed",
+                    "result": self._cached_response(prepared, task_id),
+                }
+
+            if prepared.operation.queue_kind == "inline":
+                self.storage.start_inline_execution(task_id)
+                _, work_dir = self.storage.create_execution_attempt(task_id)
+                context = OperationContext(
+                    key=prepared.key,
+                    work_dir=work_dir,
+                )
+                result = prepared.operation.run(
+                    prepared.inputs,
+                    stored_request.params,
+                    context,
+                    None,
+                )
+                return {
+                    "status": "completed",
+                    "result": self.commit_execution(
+                        prepared,
+                        result,
+                        task_id,
+                        work_dir,
+                    ),
+                }
+
+            if prepared.operation.queue_kind != "gpu":
+                raise ValueError(
+                    f"Unknown queue kind for {prepared.operation.operation_id}: " f"{prepared.operation.queue_kind}",
+                )
+
             return {
-                "status": "completed",
-                "result": self._cached_response(prepared),
+                "status": "gpu_required",
+                "task_id": task_id,
             }
+        except Exception:
+            self.storage.fail_execution(task_id)
+            raise
 
-        if prepared.operation.queue_kind == "inline":
-            context = OperationContext(
-                request_id=request.request_id,
+    def execute(
+        self,
+        task_id: str,
+        progress: Any,
+        gpu_runner: Callable[[GpuExecutionInput, Any], OperationResult],
+    ) -> dict[str, Any]:
+        try:
+            task = self.storage.start_queued_execution(task_id)
+            request = ExecutionRequest(**task["request"])
+            session = self.storage.read_session(task["session_id"])
+            if session is None:
+                raise ValueError(f"Session not found: {task['session_id']}")
+
+            prepared = self._resolve(request, session)
+            if prepared.cached_record is not None:
+                self.storage.mark_task_committing(task_id)
+                return self._cached_response(prepared, task_id)
+
+            if prepared.operation.queue_kind != "gpu":
+                raise ValueError(
+                    f"Operation {prepared.operation.operation_id} is not a GPU operation",
+                )
+
+            attempt_id, work_dir = self.storage.create_execution_attempt(task_id)
+            gpu_input = GpuExecutionInput(
+                operation_id=prepared.operation.operation_id,
+                inputs=prepared.inputs,
+                params=request.params,
                 key=prepared.key,
-                work_dir=self.storage.execution_work_dir(request.request_id),
+                attempt_id=attempt_id,
+                work_dir=work_dir,
             )
-            result = prepared.operation.run(
-                prepared.inputs,
-                request.params,
-                context,
-                None,
+            result = gpu_runner(gpu_input, progress)
+            return self.commit_execution(
+                prepared,
+                result,
+                task_id,
+                work_dir,
             )
-            return {
-                "status": "completed",
-                "result": self.commit_execution(prepared, result),
-            }
+        except Exception:
+            self.storage.fail_execution(task_id)
+            raise
 
-        return {
-            "status": "gpu_required",
-            "session_id": prepared.session["session_id"],
-            "session_revision": prepared.session["revision"],
-        }
-
-    def execute_gpu(self, request: ExecutionRequest, progress: Any) -> dict[str, Any]:
-        prepared = self._resolve(request)
-
-        if prepared.cached_record is not None:
-            return self._cached_response(prepared)
-
-        if prepared.operation.queue_kind != "gpu":
-            raise ValueError(f"Operation {prepared.operation.operation_id} is not a GPU operation")
-
-        context = OperationContext(
-            request_id=request.request_id,
-            key=prepared.key,
-            work_dir=self.storage.execution_work_dir(request.request_id),
-        )
-        result = prepared.operation.run(
-            prepared.inputs,
-            request.params,
-            context,
-            progress,
-        )
-        return self.commit_execution(prepared, result)
-
-    def _cached_response(self, prepared: PreparedExecution) -> dict[str, Any]:
+    def _cached_response(
+        self,
+        prepared: PreparedExecution,
+        task_id: str,
+    ) -> dict[str, Any]:
         request = prepared.request
         if request.execution_kind == "node_run":
             prepared.session["active_run_keys"] = [*request.parent_run_keys, prepared.key]
@@ -161,12 +234,14 @@ class Coordinator:
             if prepared.key not in prepared.session["actions_by_source"][source_key]:
                 prepared.session["actions_by_source"][source_key].append(prepared.key)
 
-        actual_record, new_revision = self.storage.commit_execution(
+        actual_record, new_revision, _ = self.storage.commit_execution(
+            task_id=task_id,
             execution_kind=request.execution_kind,
             key=prepared.key,
             record=prepared.cached_record,
             session=prepared.session,
             expected_revision=request.session_revision,
+            actual_work_dir=None,
         )
 
         return {
@@ -189,6 +264,8 @@ class Coordinator:
         self,
         prepared: PreparedExecution,
         result: OperationResult,
+        task_id: str,
+        actual_work_dir: Path,
     ) -> dict[str, Any]:
         request = prepared.request
         output_roles = [output.role for output in result.outputs]
@@ -198,23 +275,20 @@ class Coordinator:
                     f"Operation {prepared.operation.operation_id} did not produce output role: {role}",
                 )
 
+        expected_work_dir = actual_work_dir.resolve()
+        attempts_dir = self.storage.attempts_dir.resolve()
+        if expected_work_dir == attempts_dir or attempts_dir not in expected_work_dir.parents:
+            raise ValueError("Execution work_dir is outside attempts directory")
+
+        final_dir = self.storage.outputs_dir / ("node_runs" if request.execution_kind == "node_run" else "actions") / prepared.key
         outputs = {}
-        expected_work_dir = (self.storage.attempts_dir / request.request_id).resolve()
         for output in result.outputs:
             output_path = output.path.resolve()
-            if not output_path.exists():
+            if not output_path.is_file():
                 raise ValueError(f"Operation output not found: {output.role}")
             if output_path != expected_work_dir and expected_work_dir not in output_path.parents:
                 raise ValueError(f"Operation output is outside work_dir: {output.role}")
-
-        for output in result.outputs:
-            final_path = self.storage.output_path(
-                request.execution_kind,
-                prepared.key,
-                output.role,
-            )
-            final_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(output.path), str(final_path))
+            final_path = final_dir / output_path.relative_to(expected_work_dir)
             outputs[output.role] = {
                 "filename": output.filename,
                 "path": str(final_path),
@@ -263,19 +337,22 @@ class Coordinator:
             if prepared.key not in prepared.session["actions_by_source"][source_key]:
                 prepared.session["actions_by_source"][source_key].append(prepared.key)
 
-        actual_record, new_revision = self.storage.commit_execution(
+        self.storage.mark_task_committing(task_id)
+        actual_record, new_revision, cache_hit = self.storage.commit_execution(
+            task_id=task_id,
             execution_kind=request.execution_kind,
             key=prepared.key,
             record=record,
             session=prepared.session,
             expected_revision=request.session_revision,
+            actual_work_dir=actual_work_dir,
         )
 
         return {
             "key": prepared.key,
             "session_id": prepared.session["session_id"],
             "session_revision": new_revision,
-            "cached": False,
+            "cached": cache_hit,
             "outputs": {
                 role: {
                     "filename": output["filename"],
@@ -291,16 +368,18 @@ class Coordinator:
         self,
         session_id: str,
         key: str | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         session = self.storage.read_session(session_id)
         if session is None:
-            return None
+            return {"status": "not_found"}
+        if session["status"] == "expired":
+            return {"status": "session_expired"}
 
         if key is None:
             active_run_keys = session["active_run_keys"]
         else:
             if key not in session["active_run_keys"]:
-                return None
+                return {"status": "not_found"}
             key_index = session["active_run_keys"].index(key)
             active_run_keys = session["active_run_keys"][: key_index + 1]
 
@@ -343,12 +422,15 @@ class Coordinator:
                     )
 
         return {
-            "session": {
-                **session,
-                "active_run_keys": active_run_keys,
+            "status": "restored",
+            "restored": {
+                "session": {
+                    **session,
+                    "active_run_keys": active_run_keys,
+                },
+                "node_runs": node_runs,
+                "actions": actions,
             },
-            "node_runs": node_runs,
-            "actions": actions,
         }
 
     def find_lineage_node_run(

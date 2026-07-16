@@ -103,60 +103,62 @@ class Trellis2VanillaShape(Operation):
         occ_coordinates = torch.load(inputs.paths["occ_coordinates"], map_location="cpu")
 
         shape_flow_model = self.runtime.shape_flow_model_512
-        shape_flow_model.to(DEVICE)
-        condition_512 = condition_512.to(DEVICE)
-        occ_coordinates = occ_coordinates.to(DEVICE)
-        neg_condition_512 = torch.zeros_like(condition_512)
+        try:
+            shape_flow_model.to(DEVICE)
+            condition_512 = condition_512.to(DEVICE)
+            occ_coordinates = occ_coordinates.to(DEVICE)
+            neg_condition_512 = torch.zeros_like(condition_512)
 
-        noise_sampler = TRELLIS2ShapeLatentNoiseSampler()
-        shape_noise = noise_sampler.sample(
-            sp_class=SparseTensor,
-            coords=occ_coordinates,
-            feat_dim=32,
-            grid_size=32,
-            seed=seed,
-            device=DEVICE,
-        )
-
-        flow_predictor = TRELLIS2FlowPredictor(model=shape_flow_model)
-        cfg_predictor = ClassifierFreeGuidanceWrapper(
-            predictor=flow_predictor,
-            strength=cfg_strength,
-            interval=cfg_duration,
-            rescale=cfg_rescale,
-        )
-
-        flow_solver = EulerSolver()
-        shape_latent = shape_noise
-
-        flow_512_scale = 0.55 if mode == "512" else 0.25
-        progress(0.0, desc="shape_flow_512")
-        for step in flow_solver.iter_steps(
-            noise=shape_noise,
-            predictor=cfg_predictor,
-            steps=steps,
-            predictor_args={
-                "cond": condition_512,
-                "neg_cond": neg_condition_512,
-            },
-            sigma_min=1e-5,
-            rescale_t=time_step_rescale,
-        ):
-            shape_latent = step.x_t
-            progress(
-                flow_512_scale * float(step.t),
-                desc="shape_flow_512",
+            noise_sampler = TRELLIS2ShapeLatentNoiseSampler()
+            shape_noise = noise_sampler.sample(
+                sp_class=SparseTensor,
+                coords=occ_coordinates,
+                feat_dim=32,
+                grid_size=32,
+                seed=seed,
+                device=DEVICE,
             )
 
-        shape_latent = shape_latent.replace(
-            trellis2_shape_latent_to_sparse_view(shape_latent),
-        )
+            flow_predictor = TRELLIS2FlowPredictor(model=shape_flow_model)
+            cfg_predictor = ClassifierFreeGuidanceWrapper(
+                predictor=flow_predictor,
+                strength=cfg_strength,
+                interval=cfg_duration,
+                rescale=cfg_rescale,
+            )
 
-        shape_latent = shape_latent.cpu()
-        shape_flow_model.cpu()
-        del condition_512, neg_condition_512, occ_coordinates
-        del noise_sampler, shape_noise, flow_predictor, cfg_predictor, flow_solver, step
-        torch.cuda.empty_cache()
+            flow_solver = EulerSolver()
+            shape_latent = shape_noise
+
+            flow_512_scale = 0.55 if mode == "512" else 0.25
+            progress(0.0, desc="shape_flow_512")
+            for step in flow_solver.iter_steps(
+                noise=shape_noise,
+                predictor=cfg_predictor,
+                steps=steps,
+                predictor_args={
+                    "cond": condition_512,
+                    "neg_cond": neg_condition_512,
+                },
+                sigma_min=1e-5,
+                rescale_t=time_step_rescale,
+            ):
+                shape_latent = step.x_t
+                progress(
+                    flow_512_scale * float(step.t),
+                    desc="shape_flow_512",
+                )
+
+            shape_latent = shape_latent.replace(
+                trellis2_shape_latent_to_sparse_view(shape_latent),
+            )
+
+            shape_latent = shape_latent.cpu()
+            del condition_512, neg_condition_512, occ_coordinates
+            del noise_sampler, shape_noise, flow_predictor, cfg_predictor, flow_solver, step
+        finally:
+            shape_flow_model.cpu()
+            torch.cuda.empty_cache()
 
         if mode == "512":
             shape_latent_grid_size = 32
@@ -165,15 +167,17 @@ class Trellis2VanillaShape(Operation):
             condition_1024 = torch.load(inputs.paths["image_condition_1024"], map_location="cpu")
 
             shape_decoder = self.runtime.shape_decoder
-            shape_decoder.to(DEVICE)
+            try:
+                shape_decoder.to(DEVICE)
 
-            shape_latent = shape_latent.to(DEVICE)
-            hr_coords = shape_decoder.upsample(shape_latent, upsample_times=4)
+                shape_latent = shape_latent.to(DEVICE)
+                hr_coords = shape_decoder.upsample(shape_latent, upsample_times=4)
 
-            hr_coords = hr_coords.cpu()
-            shape_latent = shape_latent.cpu()
-            shape_decoder.cpu()
-            torch.cuda.empty_cache()
+                hr_coords = hr_coords.cpu()
+                shape_latent = shape_latent.cpu()
+            finally:
+                shape_decoder.cpu()
+                torch.cuda.empty_cache()
             progress(0.30, desc="shape_upsample")
 
             cascade_coordinates = None
@@ -198,77 +202,81 @@ class Trellis2VanillaShape(Operation):
                     break
 
             shape_flow_model = self.runtime.shape_flow_model_1024
-            shape_flow_model.to(DEVICE)
-            condition_1024 = condition_1024.to(DEVICE)
-            neg_condition_1024 = torch.zeros_like(condition_1024)
-            cascade_coordinates = cascade_coordinates.to(DEVICE)
+            try:
+                shape_flow_model.to(DEVICE)
+                condition_1024 = condition_1024.to(DEVICE)
+                neg_condition_1024 = torch.zeros_like(condition_1024)
+                cascade_coordinates = cascade_coordinates.to(DEVICE)
 
-            noise_sampler = TRELLIS2ShapeLatentNoiseSampler()
-            shape_noise = noise_sampler.sample(
-                sp_class=SparseTensor,
-                coords=cascade_coordinates,
-                feat_dim=32,
-                grid_size=shape_latent_grid_size,
-                seed=seed,
-                device=DEVICE,
-            )
-
-            flow_predictor = TRELLIS2FlowPredictor(model=shape_flow_model)
-            cfg_predictor = ClassifierFreeGuidanceWrapper(
-                predictor=flow_predictor,
-                strength=cfg_strength,
-                interval=cfg_duration,
-                rescale=cfg_rescale,
-            )
-
-            flow_solver = EulerSolver()
-            normalized_shape_latent = shape_noise
-
-            for step in flow_solver.iter_steps(
-                noise=shape_noise,
-                predictor=cfg_predictor,
-                steps=steps,
-                predictor_args={
-                    "cond": condition_1024,
-                    "neg_cond": neg_condition_1024,
-                },
-                sigma_min=1e-5,
-                rescale_t=time_step_rescale,
-            ):
-                normalized_shape_latent = step.x_t
-                progress(
-                    0.30 + 0.30 * float(step.t),
-                    desc="shape_flow_1024",
+                noise_sampler = TRELLIS2ShapeLatentNoiseSampler()
+                shape_noise = noise_sampler.sample(
+                    sp_class=SparseTensor,
+                    coords=cascade_coordinates,
+                    feat_dim=32,
+                    grid_size=shape_latent_grid_size,
+                    seed=seed,
+                    device=DEVICE,
                 )
 
-            shape_latent = SparseTensor(
-                feats=trellis2_shape_latent_to_sparse_view(normalized_shape_latent),
-                coords=normalized_shape_latent.coords,
-            )
+                flow_predictor = TRELLIS2FlowPredictor(model=shape_flow_model)
+                cfg_predictor = ClassifierFreeGuidanceWrapper(
+                    predictor=flow_predictor,
+                    strength=cfg_strength,
+                    interval=cfg_duration,
+                    rescale=cfg_rescale,
+                )
 
-            shape_latent = shape_latent.cpu()
-            shape_flow_model.cpu()
-            del condition_1024, neg_condition_1024, cascade_coordinates, hr_coords
-            del noise_sampler, shape_noise, normalized_shape_latent
-            del flow_predictor, cfg_predictor, flow_solver, step
-            torch.cuda.empty_cache()
+                flow_solver = EulerSolver()
+                normalized_shape_latent = shape_noise
+
+                for step in flow_solver.iter_steps(
+                    noise=shape_noise,
+                    predictor=cfg_predictor,
+                    steps=steps,
+                    predictor_args={
+                        "cond": condition_1024,
+                        "neg_cond": neg_condition_1024,
+                    },
+                    sigma_min=1e-5,
+                    rescale_t=time_step_rescale,
+                ):
+                    normalized_shape_latent = step.x_t
+                    progress(
+                        0.30 + 0.30 * float(step.t),
+                        desc="shape_flow_1024",
+                    )
+
+                shape_latent = SparseTensor(
+                    feats=trellis2_shape_latent_to_sparse_view(normalized_shape_latent),
+                    coords=normalized_shape_latent.coords,
+                )
+
+                shape_latent = shape_latent.cpu()
+                del condition_1024, neg_condition_1024, cascade_coordinates, hr_coords
+                del noise_sampler, shape_noise, normalized_shape_latent
+                del flow_predictor, cfg_predictor, flow_solver, step
+            finally:
+                shape_flow_model.cpu()
+                torch.cuda.empty_cache()
 
         shape_decoder = self.runtime.shape_decoder
         shape_decoder.set_resolution(shape_grid_size)
-        shape_decoder.to(DEVICE)
+        try:
+            shape_decoder.to(DEVICE)
 
-        shape_latent = shape_latent.to(DEVICE)
-        progress(0.55 if mode == "512" else 0.60, desc="shape_decode")
-        shape_meshes, shape_subs = shape_decoder(shape_latent, return_subs=True)
-        shape_mesh = shape_meshes[0].cpu()
-        shape_subs = [sub.cpu() for sub in shape_subs]
+            shape_latent = shape_latent.to(DEVICE)
+            progress(0.55 if mode == "512" else 0.60, desc="shape_decode")
+            shape_meshes, shape_subs = shape_decoder(shape_latent, return_subs=True)
+            shape_mesh = shape_meshes[0].cpu()
+            shape_subs = [sub.cpu() for sub in shape_subs]
 
-        shape_latent = shape_latent.cpu()
-        shape_raw_mesh_vertices = shape_mesh.vertices.contiguous()
-        shape_raw_mesh_faces = shape_mesh.faces.contiguous()
-        shape_decoder.cpu()
-        del shape_meshes
-        torch.cuda.empty_cache()
+            shape_latent = shape_latent.cpu()
+            shape_raw_mesh_vertices = shape_mesh.vertices.contiguous()
+            shape_raw_mesh_faces = shape_mesh.faces.contiguous()
+            del shape_meshes
+        finally:
+            shape_decoder.cpu()
+            torch.cuda.empty_cache()
         progress(0.70, desc="shape_decode")
 
         shape_latent_path = context.work_dir / "shape_latent.pt"

@@ -6,10 +6,10 @@ import type {
   NodeRunKey,
   NodeRunResult,
   OutputRole,
-  RequestId,
   RestoredSessionRef,
   SessionId,
   SessionRevision,
+  TaskId,
   UploadKey,
 } from '../types';
 import type { ModelId, OperationId } from '../models/types';
@@ -26,7 +26,6 @@ export type SubmitNodeRunRequest = {
   operationId: OperationId;
   parentRunKeys: NodeRunKey[];
   params: Record<string, unknown>;
-  requestId: RequestId;
   sessionId: SessionId | null;
   sessionRevision: SessionRevision;
 };
@@ -35,7 +34,6 @@ export type SubmitActionRequest = {
   modelId: ModelId;
   operationId: OperationId;
   params: Record<string, unknown>;
-  requestId: RequestId;
   sessionId: SessionId;
   sessionRevision: SessionRevision;
   sourceNodeRunKey: NodeRunKey;
@@ -57,9 +55,17 @@ type BackendPrepareResponse =
       status: 'completed';
     }
   | {
-      session_id: string;
-      session_revision: number;
       status: 'gpu_required';
+      task_id: string;
+    }
+  | {
+      status: 'session_expired';
+    };
+
+type BackendExecuteResponse =
+  | BackendExecutionResponse
+  | {
+      status: 'session_expired';
     };
 
 type BackendNodeRunRecord = {
@@ -87,16 +93,37 @@ type BackendActionRecord = {
   source_node_run_key: string;
 };
 
-type BackendRestoreSessionResponse = {
-  actions: Record<string, BackendActionRecord[]>;
-  node_runs: BackendNodeRunRecord[];
-  session: {
-    active_run_keys: string[];
-    model_id: string;
-    revision: number;
-    session_id: string;
-  };
-};
+type BackendRestoreSessionResponse =
+  | {
+      restored: {
+        actions: Record<string, BackendActionRecord[]>;
+        node_runs: BackendNodeRunRecord[];
+        session: {
+          active_run_keys: string[];
+          model_id: string;
+          revision: number;
+          session_id: string;
+        };
+      };
+      status: 'restored';
+    }
+  | {
+      status: 'session_expired';
+    }
+  | {
+      status: 'not_found';
+    };
+
+export type RestoreSessionResult =
+  | {
+      ok: true;
+      value: RestoredSessionRef;
+    }
+  | {
+      kind: 'backend_error' | 'not_found' | 'session_expired' | 'transport_error';
+      message: string;
+      ok: false;
+    };
 
 async function submitExecution(
   request: SubmitNodeRunRequest | SubmitActionRequest,
@@ -112,7 +139,6 @@ async function submitExecution(
     operation_id: request.operationId,
     params: request.params,
     parent_run_keys: executionKind === 'node_run' ? nodeRunRequest.parentRunKeys : [],
-    request_id: request.requestId,
     session_id: request.sessionId,
     session_revision: request.sessionRevision,
     source_node_run_key:
@@ -126,6 +152,14 @@ async function submitExecution(
     return prepare;
   }
 
+  if (prepare.value.status === 'session_expired') {
+    return {
+      kind: 'session_expired',
+      message: 'Session expired',
+      ok: false,
+    };
+  }
+
   if (prepare.value.status === 'completed') {
     return {
       ok: true,
@@ -133,17 +167,28 @@ async function submitExecution(
     };
   }
 
-  const executePayload = {
-    ...payload,
-    session_id: prepare.value.session_id,
-    session_revision: prepare.value.session_revision,
-  };
+  const taskId = prepare.value.task_id as TaskId;
 
-  return submitApi<BackendExecutionResponse>(
+  const execution = await submitApi<BackendExecuteResponse>(
     '/execute_execution',
-    { payload: executePayload },
+    { task_id: taskId },
     onProgress,
+    taskId,
   );
+  if (!execution.ok) {
+    return execution;
+  }
+  if ('status' in execution.value) {
+    return {
+      kind: 'session_expired',
+      message: 'Session expired',
+      ok: false,
+    };
+  }
+  return {
+    ok: true,
+    value: execution.value,
+  };
 }
 
 export async function submitNodeRun(
@@ -173,7 +218,7 @@ export async function submitNodeRun(
 export async function restoreSession(
   sessionId: SessionId,
   key?: NodeRunKey,
-): Promise<ApiResult<RestoredSessionRef>> {
+): Promise<RestoreSessionResult> {
   const result = await submitApi<BackendRestoreSessionResponse>('/restore_session', {
     key: key ?? null,
     session_id: sessionId,
@@ -182,7 +227,22 @@ export async function restoreSession(
     return result;
   }
 
-  const restored = result.value;
+  if (result.value.status === 'session_expired') {
+    return {
+      kind: 'session_expired',
+      message: 'Session expired',
+      ok: false,
+    };
+  }
+  if (result.value.status === 'not_found') {
+    return {
+      kind: 'not_found',
+      message: 'Session not found',
+      ok: false,
+    };
+  }
+
+  const restored = result.value.restored;
   return {
     ok: true,
     value: {

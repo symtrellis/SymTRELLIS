@@ -130,81 +130,85 @@ class Trellis2Texture(Operation):
             sp_class=SparseTensor,
         )
 
-        texture_flow_model.to(DEVICE)
-        condition = condition.to(DEVICE)
-        normalized_shape_latent = normalized_shape_latent.to(DEVICE)
-        neg_condition = torch.zeros_like(condition)
+        try:
+            texture_flow_model.to(DEVICE)
+            condition = condition.to(DEVICE)
+            normalized_shape_latent = normalized_shape_latent.to(DEVICE)
+            neg_condition = torch.zeros_like(condition)
 
-        noise_sampler = TRELLIS2TextureLatentNoiseSampler()
-        normalized_texture_noise = noise_sampler.sample(
-            sp_class=SparseTensor,
-            coords=normalized_shape_latent.coords,
-            feat_dim=texture_flow_model.in_channels - normalized_shape_latent.feats.shape[1],
-            grid_size=shape_latent_grid_size,
-            seed=seed,
-            device=DEVICE,
-        )
+            noise_sampler = TRELLIS2TextureLatentNoiseSampler()
+            normalized_texture_noise = noise_sampler.sample(
+                sp_class=SparseTensor,
+                coords=normalized_shape_latent.coords,
+                feat_dim=texture_flow_model.in_channels - normalized_shape_latent.feats.shape[1],
+                grid_size=shape_latent_grid_size,
+                seed=seed,
+                device=DEVICE,
+            )
 
-        flow_predictor = TRELLIS2FlowPredictor(model=texture_flow_model)
-        cfg_predictor = ClassifierFreeGuidanceWrapper(
-            predictor=flow_predictor,
-            strength=cfg_strength,
-            interval=cfg_duration,
-            rescale=cfg_rescale,
-        )
+            flow_predictor = TRELLIS2FlowPredictor(model=texture_flow_model)
+            cfg_predictor = ClassifierFreeGuidanceWrapper(
+                predictor=flow_predictor,
+                strength=cfg_strength,
+                interval=cfg_duration,
+                rescale=cfg_rescale,
+            )
 
-        flow_solver = EulerSolver()
-        normalized_texture_latent = normalized_texture_noise
+            flow_solver = EulerSolver()
+            normalized_texture_latent = normalized_texture_noise
 
-        progress(0.0, desc="texture_flow")
-        for step in flow_solver.iter_steps(
-            noise=normalized_texture_noise,
-            predictor=cfg_predictor,
-            steps=steps,
-            predictor_args={
-                "cond": condition,
-                "neg_cond": neg_condition,
-                "concat_cond": normalized_shape_latent,
-            },
-            sigma_min=1e-5,
-            rescale_t=time_step_rescale,
-        ):
-            normalized_texture_latent = step.x_t
-            progress(0.55 * float(step.t), desc="texture_flow")
+            progress(0.0, desc="texture_flow")
+            for step in flow_solver.iter_steps(
+                noise=normalized_texture_noise,
+                predictor=cfg_predictor,
+                steps=steps,
+                predictor_args={
+                    "cond": condition,
+                    "neg_cond": neg_condition,
+                    "concat_cond": normalized_shape_latent,
+                },
+                sigma_min=1e-5,
+                rescale_t=time_step_rescale,
+            ):
+                normalized_texture_latent = step.x_t
+                progress(0.55 * float(step.t), desc="texture_flow")
 
-        texture_latent = normalized_texture_latent.replace(
-            trellis2_texture_latent_to_sparse_view(normalized_texture_latent),
-        )
+            texture_latent = normalized_texture_latent.replace(
+                trellis2_texture_latent_to_sparse_view(normalized_texture_latent),
+            )
 
-        texture_latent = texture_latent.cpu()
-        texture_flow_model.cpu()
-        del condition, neg_condition, normalized_shape_latent
-        del noise_sampler, normalized_texture_noise, normalized_texture_latent
-        del flow_predictor, cfg_predictor, flow_solver, step
-        torch.cuda.empty_cache()
+            texture_latent = texture_latent.cpu()
+            del condition, neg_condition, normalized_shape_latent
+            del noise_sampler, normalized_texture_noise, normalized_texture_latent
+            del flow_predictor, cfg_predictor, flow_solver, step
+        finally:
+            texture_flow_model.cpu()
+            torch.cuda.empty_cache()
 
         raw_mesh_payload = torch.load(inputs.paths[SHAPE_RAW_MESH], map_location="cpu")
 
-        shape_subs = [
-            SparseTensor(
-                feats=item["feats"].to(DEVICE),
-                coords=item["coords"].to(DEVICE),
-            )
-            for item in raw_mesh_payload["shape_subs"]
-        ]
-
         texture_decoder = self.runtime.texture_decoder
-        texture_decoder.to(DEVICE)
+        try:
+            texture_decoder.to(DEVICE)
 
-        texture_latent = texture_latent.to(DEVICE)
-        progress(0.55, desc="texture_decode")
-        pbr_voxel = texture_decoder(texture_latent, guide_subs=shape_subs) * 0.5 + 0.5
+            shape_subs = [
+                SparseTensor(
+                    feats=item["feats"].to(DEVICE),
+                    coords=item["coords"].to(DEVICE),
+                )
+                for item in raw_mesh_payload["shape_subs"]
+            ]
 
-        texture_latent = texture_latent.cpu()
-        pbr_voxel = pbr_voxel.cpu()
-        del shape_subs
-        texture_decoder.cpu()
-        torch.cuda.empty_cache()
+            texture_latent = texture_latent.to(DEVICE)
+            progress(0.55, desc="texture_decode")
+            pbr_voxel = texture_decoder(texture_latent, guide_subs=shape_subs) * 0.5 + 0.5
+
+            texture_latent = texture_latent.cpu()
+            pbr_voxel = pbr_voxel.cpu()
+            del shape_subs
+        finally:
+            texture_decoder.cpu()
+            torch.cuda.empty_cache()
         progress(0.65, desc="texture_decode")
 
         texture_latent_path = context.work_dir / "texture_latent.pt"
@@ -230,7 +234,6 @@ class Trellis2Texture(Operation):
         )
         full_visualization_mesh.export(full_visualization_mesh_path)
 
-        pbr_voxel = pbr_voxel.cpu()
         del shape_raw_mesh
         torch.cuda.empty_cache()
         texture_voxel_count = int(pbr_voxel.coords.shape[0])

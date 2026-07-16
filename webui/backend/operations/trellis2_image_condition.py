@@ -58,11 +58,13 @@ class Trellis2ImageCondition(Operation):
         source_png = source_image.convert("RGBA" if "A" in source_image.getbands() else "RGB")
 
         rembg_model = self.runtime.rembg_model
-        rembg_model.to(DEVICE)
-        processed_image_512 = preprocess_image(source_image.copy(), rembg_model=rembg_model, target_size=512)
-        processed_image_1024 = preprocess_image(source_image.copy(), rembg_model=rembg_model, target_size=1024)
-        rembg_model.cpu()
-        torch.cuda.empty_cache()
+        try:
+            rembg_model.to(DEVICE)
+            processed_image_512 = preprocess_image(source_image.copy(), rembg_model=rembg_model, target_size=512)
+            processed_image_1024 = preprocess_image(source_image.copy(), rembg_model=rembg_model, target_size=1024)
+        finally:
+            rembg_model.cpu()
+            torch.cuda.empty_cache()
 
         image_path = context.work_dir / "image.png"
         cond_512_path = context.work_dir / "image_condition_512.pt"
@@ -71,18 +73,20 @@ class Trellis2ImageCondition(Operation):
         source_png.save(image_path)
 
         image_cond_model = self.runtime.image_cond_model
-        image_cond_model.to(DEVICE)
+        try:
+            image_cond_model.to(DEVICE)
 
-        image_cond_model.image_size = 512
-        cond_512 = image_cond_model([processed_image_512]).detach().cpu()
+            image_cond_model.image_size = 512
+            cond_512 = image_cond_model([processed_image_512]).detach().cpu()
+
+            image_cond_model.image_size = 1024
+            cond_1024 = image_cond_model([processed_image_1024]).detach().cpu()
+        finally:
+            image_cond_model.cpu()
+            torch.cuda.empty_cache()
+
         torch.save(cond_512, cond_512_path)
-
-        image_cond_model.image_size = 1024
-        cond_1024 = image_cond_model([processed_image_1024]).detach().cpu()
         torch.save(cond_1024, cond_1024_path)
-
-        image_cond_model.cpu()
-        torch.cuda.empty_cache()
 
         return OperationResult(
             outputs=[

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useReducer,
@@ -281,6 +282,48 @@ export default function App() {
     ],
   );
 
+  const handleSessionExpired = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('session');
+    params.delete('key');
+    const search = params.toString();
+    window.history.replaceState(null, '', search ? `/?${search}` : '/');
+
+    dispatchImageCondition({ type: 'resetSession' });
+    dispatchManualSymmetry({ type: 'reset' });
+    dispatchDetection({ type: 'reset' });
+    dispatchTrellis2VanillaSparseStructure({
+      metadata: trellis2InitialSparseMetadata,
+      params: trellis2GenerationDefaults.vanillaSparseStructure,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2SymmetrySparseStructure({
+      metadata: trellis2InitialSparseMetadata,
+      params: trellis2GenerationDefaults.symmetrySparseStructure,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2VanillaShape({
+      metadata: trellis2InitialShapeMetadata,
+      params: trellis2GenerationDefaults.vanillaShape,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2SymmetryShape({
+      metadata: trellis2InitialShapeMetadata,
+      params: trellis2GenerationDefaults.symmetryShape,
+      type: 'resetToNodeStart',
+    });
+    dispatchTrellis2Texture({
+      metadata: trellis2InitialTextureMetadata,
+      params: trellis2GenerationDefaults.texture,
+      type: 'resetToNodeStart',
+    });
+    setExportStates({});
+    setWorkflow(enterModelDag(createInitialWorkflowState(), selectedModel));
+    sessionMutationInFlightRef.current = false;
+    setSessionMutationInFlight(false);
+    setUrlSyncReady(true);
+  }, [selectedModel]);
+
   useEffect(() => {
     writeStoredTheme(theme);
   }, [theme]);
@@ -318,17 +361,26 @@ export default function App() {
       const result = await restoreSession(sessionId, key ?? undefined);
 
       if (!result.ok) {
-        if (
-          result.message.includes('404') ||
-          result.message.includes('Session not found')
-        ) {
+        if (result.kind === 'session_expired') {
+          handleSessionExpired();
+          return;
+        }
+
+        if (result.kind === 'not_found') {
           params.delete('session');
           params.delete('key');
           const search = params.toString();
           window.history.replaceState(null, '', search ? `/?${search}` : '/');
           setUrlSyncReady(true);
+          return;
         }
 
+        setWorkflow((state) => enterModelDag(state, selectedModel));
+        dispatchImageCondition({
+          message: `Session restore failed: ${result.message}`,
+          type: 'conditionGenerationFailed',
+        });
+        setUrlSyncReady(true);
         return;
       }
 
@@ -531,7 +583,7 @@ export default function App() {
 
       setUrlSyncReady(true);
     })();
-  }, [selectedModel]);
+  }, [handleSessionExpired, selectedModel]);
 
   useEffect(() => {
     if (!urlSyncReady) {
@@ -622,11 +674,14 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: [],
       params,
-      requestId: newRequestId(),
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     });
     if (!runResult.ok) {
+      if (runResult.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchImageCondition({
         message: runResult.message,
         type: 'conditionGenerationFailed',
@@ -664,11 +719,14 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params,
-      requestId: newRequestId(),
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchManualSymmetry({ message: result.message, type: 'confirmationFailed' });
       sessionMutationInFlightRef.current = false;
       setSessionMutationInFlight(false);
@@ -703,11 +761,14 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params,
-      requestId: newRequestId(),
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchDetection({ message: result.message, type: 'confirmationFailed' });
       sessionMutationInFlightRef.current = false;
       setSessionMutationInFlight(false);
@@ -740,12 +801,15 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: trellis2OperationIds.detectRotationSymmetry,
       params,
-      requestId: newRequestId(),
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
       sourceNodeRunKey: sourceRunKey,
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchDetection({ message: result.message, type: 'majorDetectionFailed' });
       sessionMutationInFlightRef.current = false;
       setSessionMutationInFlight(false);
@@ -791,12 +855,15 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: trellis2OperationIds.detectFinerSymmetry,
       params,
-      requestId: newRequestId(),
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
       sourceNodeRunKey: sourceRunKey,
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchDetection({ message: result.message, type: 'finerDetectionFailed' });
       sessionMutationInFlightRef.current = false;
       setSessionMutationInFlight(false);
@@ -839,12 +906,15 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: trellis2OperationIds.detectReflectionPlanes,
       params,
-      requestId: newRequestId(),
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
       sourceNodeRunKey: sourceRunKey,
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchDetection({ message: result.message, type: 'reflectionDetectionFailed' });
       sessionMutationInFlightRef.current = false;
       setSessionMutationInFlight(false);
@@ -885,7 +955,6 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params,
-      requestId,
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     }, (progress) => {
@@ -897,6 +966,10 @@ export default function App() {
       });
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchTrellis2VanillaSparseStructure({
         message: result.message,
         requestId,
@@ -941,7 +1014,6 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params,
-      requestId,
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     }, (progress) => {
@@ -953,6 +1025,10 @@ export default function App() {
       });
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchTrellis2SymmetrySparseStructure({
         message: result.message,
         requestId,
@@ -992,7 +1068,6 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params,
-      requestId,
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     }, (progress) => {
@@ -1004,6 +1079,10 @@ export default function App() {
       });
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchTrellis2VanillaShape({
         message: result.message,
         requestId,
@@ -1048,7 +1127,6 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params,
-      requestId,
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     }, (progress) => {
@@ -1060,6 +1138,10 @@ export default function App() {
       });
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchTrellis2SymmetryShape({
         message: result.message,
         requestId,
@@ -1099,7 +1181,6 @@ export default function App() {
       operationId: currentNode.operation,
       parentRunKeys: parentRunKeysForCurrentNode(workflow),
       params,
-      requestId,
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
     }, (progress) => {
@@ -1111,6 +1192,10 @@ export default function App() {
       });
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       dispatchTrellis2Texture({
         message: result.message,
         requestId,
@@ -1191,7 +1276,6 @@ export default function App() {
       modelId: selectedModel.id,
       operationId: trellis2OperationIds.exportGlb,
       params,
-      requestId,
       sessionId: workflow.sessionId,
       sessionRevision: workflow.sessionRevision,
       sourceNodeRunKey: sourceRunKey,
@@ -1214,6 +1298,10 @@ export default function App() {
       });
     });
     if (!result.ok) {
+      if (result.kind === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
       setExportStates((states) => {
         const state = states[nodeId] ?? exportState;
 

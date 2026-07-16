@@ -76,67 +76,71 @@ class Trellis2VanillaSparseStructure(Operation):
         condition = torch.load(inputs.paths["condition"], map_location="cpu")
 
         ss_flow_model = self.runtime.ss_flow_model
-        ss_flow_model.to(DEVICE)
-        condition = condition.to(DEVICE)
-        neg_condition = torch.zeros_like(condition)
+        try:
+            ss_flow_model.to(DEVICE)
+            condition = condition.to(DEVICE)
+            neg_condition = torch.zeros_like(condition)
 
-        noise_sampler = TRELLIS2SparseStructureLatentNoiseSampler()
-        noise = noise_sampler.sample(
-            batch_size=condition.shape[0],
-            grid_size=ss_flow_model.resolution,
-            feat_dim=ss_flow_model.in_channels,
-            seed=seed,
-            device=DEVICE,
-        )
+            noise_sampler = TRELLIS2SparseStructureLatentNoiseSampler()
+            noise = noise_sampler.sample(
+                batch_size=condition.shape[0],
+                grid_size=ss_flow_model.resolution,
+                feat_dim=ss_flow_model.in_channels,
+                seed=seed,
+                device=DEVICE,
+            )
 
-        flow_predictor = TRELLIS2FlowPredictor(model=ss_flow_model)
-        cfg_predictor = ClassifierFreeGuidanceWrapper(
-            predictor=flow_predictor,
-            strength=cfg_strength,
-            interval=cfg_duration,
-            rescale=cfg_rescale,
-        )
+            flow_predictor = TRELLIS2FlowPredictor(model=ss_flow_model)
+            cfg_predictor = ClassifierFreeGuidanceWrapper(
+                predictor=flow_predictor,
+                strength=cfg_strength,
+                interval=cfg_duration,
+                rescale=cfg_rescale,
+            )
 
-        flow_solver = EulerSolver()
-        sparse_structure_latent = noise
-        progress(0.0, desc="sparse_structure_flow")
-        for step in flow_solver.iter_steps(
-            noise=noise,
-            predictor=cfg_predictor,
-            steps=steps,
-            predictor_args={
-                "cond": condition,
-                "neg_cond": neg_condition,
-            },
-            sigma_min=1e-5,
-            rescale_t=time_step_rescale,
-        ):
-            sparse_structure_latent = step.x_t
-            progress(0.80 * float(step.t), desc="sparse_structure_flow")
+            flow_solver = EulerSolver()
+            sparse_structure_latent = noise
+            progress(0.0, desc="sparse_structure_flow")
+            for step in flow_solver.iter_steps(
+                noise=noise,
+                predictor=cfg_predictor,
+                steps=steps,
+                predictor_args={
+                    "cond": condition,
+                    "neg_cond": neg_condition,
+                },
+                sigma_min=1e-5,
+                rescale_t=time_step_rescale,
+            ):
+                sparse_structure_latent = step.x_t
+                progress(0.80 * float(step.t), desc="sparse_structure_flow")
 
-        sparse_structure_latent = sparse_structure_latent.cpu()
-        ss_flow_model.cpu()
-        del condition, neg_condition, noise, flow_predictor, cfg_predictor, flow_solver, step
-        torch.cuda.empty_cache()
+            sparse_structure_latent = sparse_structure_latent.cpu()
+            del condition, neg_condition, noise, flow_predictor, cfg_predictor, flow_solver, step
+        finally:
+            ss_flow_model.cpu()
+            torch.cuda.empty_cache()
 
         ss_decoder = self.runtime.ss_decoder
-        ss_decoder.to(DEVICE)
-        sparse_structure_latent = sparse_structure_latent.to(DEVICE)
-        occ_logits = ss_decoder(sparse_structure_latent)
-        occ = occ_logits > 0
-        pool_size = occ_logits.shape[-1] // 32
-        occ_32 = torch.nn.functional.max_pool3d(occ.float(), pool_size, pool_size, 0) > 0.5
-        occ_coordinates = trellis2_sparse_structure_logits_to_coords(
-            logits=occ_logits,
-            target_resolution=32,
-        )
-        occ_visualization_mesh = trellis2_occ_to_visualization_mesh(occ_32[0, 0], y_up=True)
+        try:
+            ss_decoder.to(DEVICE)
+            sparse_structure_latent = sparse_structure_latent.to(DEVICE)
+            occ_logits = ss_decoder(sparse_structure_latent)
+            occ = occ_logits > 0
+            pool_size = occ_logits.shape[-1] // 32
+            occ_32 = torch.nn.functional.max_pool3d(occ.float(), pool_size, pool_size, 0) > 0.5
+            occ_coordinates = trellis2_sparse_structure_logits_to_coords(
+                logits=occ_logits,
+                target_resolution=32,
+            )
+            occ_visualization_mesh = trellis2_occ_to_visualization_mesh(occ_32[0, 0], y_up=True)
 
-        sparse_structure_latent = sparse_structure_latent.cpu()
-        occ_coordinates = occ_coordinates.cpu()
-        ss_decoder.cpu()
-        del occ_logits, occ, occ_32
-        torch.cuda.empty_cache()
+            sparse_structure_latent = sparse_structure_latent.cpu()
+            occ_coordinates = occ_coordinates.cpu()
+            del occ_logits, occ, occ_32
+        finally:
+            ss_decoder.cpu()
+            torch.cuda.empty_cache()
         progress(1.0, desc="sparse_structure_decode")
 
         sparse_structure_latent_path = context.work_dir / "sparse_structure_latent.pt"
