@@ -96,6 +96,9 @@ class Task(BaseTask[Config]):
         decoder.float().eval().to(device)
         for parameter in decoder.parameters():
             parameter.requires_grad_(False)
+        for stage in decoder.blocks:
+            for block in stage:
+                block.use_checkpoint = True
         self.decoder = decoder
 
     def extra_loss_and_metrics(
@@ -125,10 +128,7 @@ class Task(BaseTask[Config]):
             )
 
         decoded_output_l2 = F.mse_loss(prediction_output.feats.float(), target_output.feats.float())
-        decoded_subdivision_l2 = torch.stack([
-            F.mse_loss(prediction_subdivision.feats.float(), target_subdivision.feats.float())
-            for prediction_subdivision, target_subdivision in zip(prediction_subdivisions, target_subdivisions)
-        ]).mean()
+        decoded_subdivision_l2 = torch.stack([F.mse_loss(prediction_subdivision.feats.float(), target_subdivision.feats.float()) for prediction_subdivision, target_subdivision in zip(prediction_subdivisions, target_subdivisions)]).mean()
 
         output_loss = self.config.decoded_output_weight * decoded_output_l2
         subdivision_loss = self.config.decoded_subdivision_weight * decoded_subdivision_l2
