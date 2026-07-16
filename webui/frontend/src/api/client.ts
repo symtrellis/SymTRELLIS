@@ -1,74 +1,60 @@
+import { Client } from '@gradio/client';
+import type { ExecutionProgress } from '../types';
+
 export type ApiResult<T> = { ok: true; value: T } | { message: string; ok: false };
 
-export async function postJson<ResponseBody>(
-  path: string,
-  body: unknown,
-): Promise<ApiResult<ResponseBody>> {
-  const response = await fetch(path, {
-    body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json' },
-    method: 'POST',
-  });
+let clientPromise: Promise<Client> | null = null;
 
-  if (!response.ok) {
-    if (response.headers.get('content-type')?.includes('application/json')) {
-      const errorBody = (await response.json()) as {
-        detail?: { message?: string } | string;
-        error?: { message?: string };
-      };
-      const detailMessage =
-        typeof errorBody.detail === 'string' ? errorBody.detail : errorBody.detail?.message;
-
-      return {
-        message: detailMessage ?? errorBody.error?.message ?? `${response.status} ${response.statusText}`,
-        ok: false,
-      };
-    }
-
-    return { message: `${response.status} ${response.statusText}`, ok: false };
+export function gradioClient(): Promise<Client> {
+  if (clientPromise === null) {
+    clientPromise = Client.connect(window.location.origin, {
+      events: ['data', 'status'],
+    });
   }
 
-  return { ok: true, value: (await response.json()) as ResponseBody };
+  return clientPromise;
 }
 
-export async function postForm<ResponseBody>(
-  path: string,
-  formData: FormData,
+export async function submitApi<ResponseBody>(
+  endpoint: string,
+  payload: Record<string, unknown>,
+  onProgress?: (progress: ExecutionProgress) => void,
 ): Promise<ApiResult<ResponseBody>> {
-  const response = await fetch(path, {
-    body: formData,
-    method: 'POST',
-  });
+  const client = await gradioClient();
+  const job = client.submit(endpoint, payload);
 
-  if (!response.ok) {
-    if (response.headers.get('content-type')?.includes('application/json')) {
-      const errorBody = (await response.json()) as {
-        detail?: { message?: string } | string;
-        error?: { message?: string };
-      };
-      const detailMessage =
-        typeof errorBody.detail === 'string' ? errorBody.detail : errorBody.detail?.message;
+  for await (const message of job) {
+    if (message.type === 'status') {
+      if (message.stage === 'pending') {
+        onProgress?.({ progress: 0, stage: 'queued' });
+      }
 
-      return {
-        message: detailMessage ?? errorBody.error?.message ?? `${response.status} ${response.statusText}`,
-        ok: false,
-      };
+      const progressUnit = message.progress_data?.at(-1);
+      if (progressUnit) {
+        onProgress?.({
+          progress: progressUnit.progress ?? 0,
+          stage: progressUnit.desc ?? message.stage,
+        });
+      }
+
+      if (message.stage === 'error') {
+        return {
+          message: String(message.message ?? 'Gradio request failed'),
+          ok: false,
+        };
+      }
     }
 
-    return { message: `${response.status} ${response.statusText}`, ok: false };
+    if (message.type === 'data') {
+      return {
+        ok: true,
+        value: message.data[0] as ResponseBody,
+      };
+    }
   }
-
-  return { ok: true, value: (await response.json()) as ResponseBody };
-}
-
-export function createJsonWebSocket(path: string) {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${protocol}//${window.location.host}${path}`);
 
   return {
-    sendJson(message: unknown) {
-      socket.send(JSON.stringify(message));
-    },
-    socket,
+    message: 'Gradio request completed without data',
+    ok: false,
   };
 }

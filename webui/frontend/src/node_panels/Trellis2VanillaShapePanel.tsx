@@ -73,6 +73,7 @@ export function Trellis2VanillaShapePanel({
           { label: 'o-voxel grid size', value: state.metadata.oVoxelGridSize },
         ]}
         progress={state.run.progress}
+        stage={state.run.stage}
         status={state.run.status}
       />
 

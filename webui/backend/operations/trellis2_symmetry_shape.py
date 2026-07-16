@@ -1,4 +1,5 @@
-import asyncio
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +22,8 @@ from symtrellis.flow import (
 from symtrellis.mapper import SymmetryProjector, concat_coeff
 from symtrellis.symmetry import build_symmetry_relation_inputs, get_3d_point_group
 
-from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
-from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
+from ..loaders.trellis2 import DEVICE, TRELLIS2Runtime
+from . import Operation, OperationContext, OperationInputs, OperationOutput, OperationResult, forward_glb_progress
 from .symmetry import ConfirmDetectedSymmetry, ConfirmManualSymmetry
 from .trellis2_symmetry_sparse_structure import Trellis2SymmetrySparseStructure
 from .trellis2_vanilla_shape import SHAPE_LATENT, SHAPE_RAW_MESH, SHAPE_VISUALIZATION_MESH
@@ -36,8 +37,8 @@ class Trellis2SymmetryShape(Operation):
     queue_kind = "gpu"
     output_roles = (SHAPE_LATENT, SHAPE_RAW_MESH, SHAPE_VISUALIZATION_MESH)
 
-    def __init__(self, loader: TRELLIS2Loader):
-        self.loader = loader
+    def __init__(self, runtime: TRELLIS2Runtime):
+        self.runtime = runtime
 
     def resolve_inputs(self, coordinator: Any, request: Any) -> OperationInputs:
         image_condition_record = coordinator.find_lineage_node_run(
@@ -103,12 +104,12 @@ class Trellis2SymmetryShape(Operation):
             "symmetry_node_run_key": inputs.records["symmetry"]["node_run_key"],
         }
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any],
     ) -> OperationResult:
         seed = int(params["seed"])
         steps = int(params["steps"])
@@ -140,7 +141,7 @@ class Trellis2SymmetryShape(Operation):
         condition_512 = torch.load(inputs.paths["image_condition_512"], map_location="cpu")
         occ_coordinates = torch.load(inputs.paths["occ_coordinates"], map_location="cpu")
 
-        shape_flow_model = self.loader.shape_flow_model_512
+        shape_flow_model = self.runtime.shape_flow_model_512
         occ_coordinates = occ_coordinates.to(DEVICE)
 
         O_dst2src, t_dst2src, s_dst2src = get_3d_point_group(
@@ -151,14 +152,19 @@ class Trellis2SymmetryShape(Operation):
             include_identity=False,
         )
 
-        shape_mapper = self.loader.shape_mapper
+        shape_mapper = self.runtime.shape_mapper
         shape_mapper.to(DEVICE)
 
         shape_coeff_chunks = []
         shape_rows_src_chunks = []
         shape_rows_dst_chunks = []
 
-        for relation_start in range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE):
+        num_relation_chunks = (O_dst2src.shape[0] + SHAPE_MAPPER_RELATION_CHUNK_SIZE - 1) // SHAPE_MAPPER_RELATION_CHUNK_SIZE
+        mapper_512_scale = 0.10 if mode == "512" else 0.08
+        progress(0.0, desc="shape_mapper_512")
+        for chunk_index, relation_start in enumerate(
+            range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE),
+        ):
             relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
             chunk_relations = [
                 (
@@ -187,6 +193,10 @@ class Trellis2SymmetryShape(Operation):
             del shape_coeff_chunk
             del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
             del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
+            progress(
+                mapper_512_scale * (chunk_index + 1) / num_relation_chunks,
+                desc="shape_mapper_512",
+            )
 
         shape_mapper.cpu()
         torch.cuda.empty_cache()
@@ -246,37 +256,39 @@ class Trellis2SymmetryShape(Operation):
         flow_solver = EulerSolver()
         shape_latent = shape_noise
 
-        await emit({"type": "progress", "progress": 0.0})
-        for step_index, step in enumerate(
-            flow_solver.iter_steps(
-                noise=shape_noise,
-                predictor=spg_predictor,
-                steps=steps,
-                predictor_args={
-                    "cond": condition_512,
-                    "neg_cond": neg_condition_512,
-                    "projector": shape_projector,
-                    "to_sparse_view": shape_view.to_sparse_view,
-                    "to_original_view": shape_view.to_original_view,
-                    "self_include": True,
-                },
-                sigma_min=1e-5,
-                rescale_t=time_step_rescale,
-            ),
+        flow_512_offset = 0.10 if mode == "512" else 0.08
+        flow_512_scale = 0.45 if mode == "512" else 0.17
+        for step in flow_solver.iter_steps(
+            noise=shape_noise,
+            predictor=spg_predictor,
+            steps=steps,
+            predictor_args={
+                "cond": condition_512,
+                "neg_cond": neg_condition_512,
+                "projector": shape_projector,
+                "to_sparse_view": shape_view.to_sparse_view,
+                "to_original_view": shape_view.to_original_view,
+                "self_include": True,
+            },
+            sigma_min=1e-5,
+            rescale_t=time_step_rescale,
         ):
             shape_latent = step.x_t
-            if step_index > 0:
-                await emit({"type": "progress", "progress": float(step.t)})
+            progress(
+                flow_512_offset + flow_512_scale * float(step.t),
+                desc="shape_flow_512",
+            )
 
         shape_latent = shape_latent.replace(
             trellis2_shape_latent_to_sparse_view(shape_latent),
         )
 
+        shape_latent = shape_latent.cpu()
         shape_flow_model.cpu()
-        condition_512 = condition_512.cpu()
-        neg_condition_512 = neg_condition_512.cpu()
         del shape_projector, shape_coeff
-        del shape_rows_src, shape_rows_dst, shape_view
+        del shape_rows_src, shape_rows_dst, shape_view, occ_coordinates
+        del condition_512, neg_condition_512, noise_sampler, shape_noise
+        del flow_predictor, cfg_predictor, spg_predictor, flow_solver, step
         torch.cuda.empty_cache()
 
         if mode == "512":
@@ -285,14 +297,17 @@ class Trellis2SymmetryShape(Operation):
         else:
             condition_1024 = torch.load(inputs.paths["image_condition_1024"], map_location="cpu")
 
-            shape_decoder = self.loader.shape_decoder
+            shape_decoder = self.runtime.shape_decoder
             shape_decoder.to(DEVICE)
 
+            shape_latent = shape_latent.to(DEVICE)
             hr_coords = shape_decoder.upsample(shape_latent, upsample_times=4)
 
+            hr_coords = hr_coords.cpu()
             shape_latent = shape_latent.cpu()
             shape_decoder.cpu()
             torch.cuda.empty_cache()
+            progress(0.30, desc="shape_upsample")
 
             cascade_coordinates = hr_coords
             shape_latent_grid_size = 64
@@ -314,14 +329,18 @@ class Trellis2SymmetryShape(Operation):
                     shape_grid_size = candidate_shape_latent_grid_size * 16
                     break
 
-            shape_mapper = self.loader.shape_mapper
+            shape_mapper = self.runtime.shape_mapper
             shape_mapper.to(DEVICE)
+            cascade_coordinates = cascade_coordinates.to(DEVICE)
 
             shape_coeff_chunks = []
             shape_rows_src_chunks = []
             shape_rows_dst_chunks = []
 
-            for relation_start in range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE):
+            progress(0.30, desc="shape_mapper_1024")
+            for chunk_index, relation_start in enumerate(
+                range(0, O_dst2src.shape[0], SHAPE_MAPPER_RELATION_CHUNK_SIZE),
+            ):
                 relation_end = relation_start + SHAPE_MAPPER_RELATION_CHUNK_SIZE
                 chunk_relations = [
                     (
@@ -350,6 +369,10 @@ class Trellis2SymmetryShape(Operation):
                 del shape_coeff_chunk
                 del shape_coords_src, shape_coords_dst, shape_O, shape_t, shape_s
                 del shape_rows_src_chunk, shape_rows_dst_chunk, chunk_relations
+                progress(
+                    0.30 + 0.08 * (chunk_index + 1) / num_relation_chunks,
+                    desc="shape_mapper_1024",
+                )
 
             shape_mapper.cpu()
             torch.cuda.empty_cache()
@@ -370,7 +393,7 @@ class Trellis2SymmetryShape(Operation):
                 sp_class=SparseTensor,
             )
 
-            shape_flow_model = self.loader.shape_flow_model_1024
+            shape_flow_model = self.runtime.shape_flow_model_1024
             shape_flow_model.to(DEVICE)
             condition_1024 = condition_1024.to(DEVICE)
             neg_condition_1024 = torch.zeros_like(condition_1024)
@@ -410,52 +433,61 @@ class Trellis2SymmetryShape(Operation):
             flow_solver = EulerSolver()
             normalized_shape_latent = shape_noise
 
-            await emit({"type": "progress", "progress": 0.0})
-            for step_index, step in enumerate(
-                flow_solver.iter_steps(
-                    noise=shape_noise,
-                    predictor=spg_predictor,
-                    steps=steps,
-                    predictor_args={
-                        "cond": condition_1024,
-                        "neg_cond": neg_condition_1024,
-                        "projector": shape_projector,
-                        "to_sparse_view": shape_view.to_sparse_view,
-                        "to_original_view": shape_view.to_original_view,
-                        "self_include": True,
-                    },
-                    sigma_min=1e-5,
-                    rescale_t=time_step_rescale,
-                ),
+            for step in flow_solver.iter_steps(
+                noise=shape_noise,
+                predictor=spg_predictor,
+                steps=steps,
+                predictor_args={
+                    "cond": condition_1024,
+                    "neg_cond": neg_condition_1024,
+                    "projector": shape_projector,
+                    "to_sparse_view": shape_view.to_sparse_view,
+                    "to_original_view": shape_view.to_original_view,
+                    "self_include": True,
+                },
+                sigma_min=1e-5,
+                rescale_t=time_step_rescale,
             ):
                 normalized_shape_latent = step.x_t
-                if step_index > 0:
-                    await emit({"type": "progress", "progress": float(step.t)})
+                progress(
+                    0.38 + 0.22 * float(step.t),
+                    desc="shape_flow_1024",
+                )
 
             shape_latent = SparseTensor(
                 feats=trellis2_shape_latent_to_sparse_view(normalized_shape_latent),
                 coords=normalized_shape_latent.coords,
             )
 
+            shape_latent = shape_latent.cpu()
             shape_flow_model.cpu()
-            condition_1024 = condition_1024.cpu()
-            neg_condition_1024 = neg_condition_1024.cpu()
             del shape_projector, shape_coeff
-            del shape_rows_src, shape_rows_dst, shape_view
+            del shape_rows_src, shape_rows_dst, shape_view, cascade_coordinates, hr_coords
+            del condition_1024, neg_condition_1024, noise_sampler, shape_noise
+            del normalized_shape_latent, flow_predictor, cfg_predictor, spg_predictor, flow_solver, step
             torch.cuda.empty_cache()
 
-        shape_decoder = self.loader.shape_decoder
+        del O_dst2src, t_dst2src, s_dst2src
+        del symmetry_center, symmetry_major_axis, symmetry_minor_axis
+        torch.cuda.empty_cache()
+
+        shape_decoder = self.runtime.shape_decoder
         shape_decoder.set_resolution(shape_grid_size)
         shape_decoder.to(DEVICE)
 
+        shape_latent = shape_latent.to(DEVICE)
+        progress(0.55 if mode == "512" else 0.60, desc="shape_decode")
         shape_meshes, shape_subs = shape_decoder(shape_latent, return_subs=True)
-        shape_mesh = shape_meshes[0]
+        shape_mesh = shape_meshes[0].cpu()
+        shape_subs = [sub.cpu() for sub in shape_subs]
 
         shape_latent = shape_latent.cpu()
-        shape_raw_mesh_vertices = shape_mesh.vertices.cpu().contiguous()
-        shape_raw_mesh_faces = shape_mesh.faces.cpu().contiguous()
+        shape_raw_mesh_vertices = shape_mesh.vertices.contiguous()
+        shape_raw_mesh_faces = shape_mesh.faces.contiguous()
         shape_decoder.cpu()
+        del shape_meshes
         torch.cuda.empty_cache()
+        progress(0.70, desc="shape_decode")
 
         shape_latent_path = context.work_dir / "shape_latent.pt"
         shape_raw_mesh_path = context.work_dir / "shape_raw_mesh.pt"
@@ -475,8 +507,8 @@ class Trellis2SymmetryShape(Operation):
                 "faces": shape_raw_mesh_faces.cpu().contiguous(),
                 "shape_subs": [
                     {
-                        "coords": sub.coords.cpu().contiguous(),
-                        "feats": sub.feats.cpu().contiguous(),
+                        "coords": sub.coords.contiguous(),
+                        "feats": sub.feats.contiguous(),
                     }
                     for sub in shape_subs
                 ],
@@ -484,23 +516,7 @@ class Trellis2SymmetryShape(Operation):
             shape_raw_mesh_path,
         )
 
-        loop = asyncio.get_running_loop()
-
-        def report_glb(update: dict[str, Any]) -> None:
-            asyncio.run_coroutine_threadsafe(
-                emit(
-                    {
-                        "type": "progress",
-                        "progress": float(update["progress"]),
-                        "stage": update["stage"],
-                    },
-                ),
-                loop,
-            )
-
-        await emit({"type": "progress", "progress": 0.0})
-        shape_visualization_mesh = await asyncio.to_thread(
-            trelli2_mesh_to_glb,
+        shape_visualization_mesh = trelli2_mesh_to_glb(
             shape_mesh=shape_mesh,
             res=shape_grid_size,
             device=torch.device(DEVICE),
@@ -510,9 +526,11 @@ class Trellis2SymmetryShape(Operation):
             decimation_target=100_000,
             remesh_band=1.0,
             remesh_project=0.0,
-            report=report_glb,
+            report=partial(forward_glb_progress, progress, 0.70, 0.30),
         )
         shape_visualization_mesh.export(shape_visualization_mesh_path)
+        del shape_mesh
+        torch.cuda.empty_cache()
 
         voxel_count = int(shape_latent.coords.shape[0])
 

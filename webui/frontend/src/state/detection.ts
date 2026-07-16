@@ -12,6 +12,7 @@ import type {
   SymmetryTuple,
   Vector3,
 } from '../types';
+import type { WorkflowActionRun } from './workflow';
 import {
   familySecondaryFold,
   labelsForFamily,
@@ -103,6 +104,13 @@ export type DetectionAction =
   | { type: 'confirmationStarted' }
   | { message: string; type: 'confirmationFailed' }
   | { type: 'confirmationCompleted' }
+  | {
+      confirmedSymmetry: SymmetryTuple | null;
+      finerAction: WorkflowActionRun | null;
+      reflectionAction: WorkflowActionRun | null;
+      rotationAction: WorkflowActionRun | null;
+      type: 'detectionRestored';
+    }
   | { type: 'reset' };
 
 export const initialDetectionState: DetectionState = {
@@ -235,6 +243,81 @@ export function detectionInstruction(state: DetectionState): string {
 export function detectionReducer(state: DetectionState, action: DetectionAction): DetectionState {
   if (action.type === 'reset') {
     return initialDetectionState;
+  }
+
+  if (action.type === 'detectionRestored') {
+    let restored = initialDetectionState;
+
+    if (action.reflectionAction) {
+      restored = detectionReducer(restored, {
+        actionKey: action.reflectionAction.key,
+        candidates: action.reflectionAction.jsonResult as ReflectionPlaneDetectionResult[],
+        type: 'reflectionPlanesLoaded',
+      });
+    } else if (action.rotationAction) {
+      restored = detectionReducer(restored, {
+        actionKey: action.rotationAction.key,
+        candidates: action.rotationAction.jsonResult as RotationAxisDetectionResult[],
+        type: 'rotationAxesLoaded',
+      });
+
+      if (action.finerAction) {
+        restored = {
+          ...restored,
+          center: action.finerAction.params.center as Vector3,
+          majorAxis: action.finerAction.params.majorAxis as Vector3,
+        };
+        restored = detectionReducer(restored, {
+          actionKey: action.finerAction.key,
+          result: action.finerAction.jsonResult as FinerSymmetryDetectionResult,
+          type: 'finerResultLoaded',
+        });
+      }
+    }
+
+    if (action.confirmedSymmetry) {
+      let family: SymmetryFamily = 'axial';
+      let fold = Number.parseInt(action.confirmedSymmetry.label.slice(1), 10);
+
+      if (action.confirmedSymmetry.label === 'S1') {
+        fold = 1;
+      } else if (action.confirmedSymmetry.label.startsWith('T')) {
+        family = 'T';
+        fold = 3;
+      } else if (action.confirmedSymmetry.label.startsWith('O')) {
+        family = 'O';
+        fold = 4;
+      } else if (action.confirmedSymmetry.label.startsWith('I')) {
+        family = 'I';
+        fold = 5;
+      } else if (action.confirmedSymmetry.label.startsWith('S')) {
+        fold /= 2;
+      }
+
+      restored = {
+        ...restored,
+        activeDetectionKind:
+          action.confirmedSymmetry.label === 'S1' ? 'reflection' : 'rotation',
+        center: action.confirmedSymmetry.center,
+        confirmationError: '',
+        confirming: false,
+        family,
+        fold,
+        labels:
+          action.confirmedSymmetry.label === 'S1'
+            ? ['S1']
+            : labelsForFamily(family, fold),
+        majorAxis: action.confirmedSymmetry.majorAxis,
+        minorAxis: action.confirmedSymmetry.minorAxis,
+        proposedSymmetry: action.confirmedSymmetry,
+        reflectionCenter: action.confirmedSymmetry.center,
+        reflectionNormal: action.confirmedSymmetry.majorAxis,
+        selectedLabel: action.confirmedSymmetry.label,
+        symmetryPreview: action.confirmedSymmetry,
+      };
+    }
+
+    return restored;
   }
 
   if (action.type === 'confirmationStarted') {

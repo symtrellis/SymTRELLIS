@@ -31,6 +31,12 @@ export type ImageConditionAction =
       type: 'conditionGenerated';
     }
   | {
+      filename: string;
+      previewUrl: string;
+      run: NodeRunResult;
+      type: 'conditionRestored';
+    }
+  | {
       message: string;
       type: 'conditionGenerationFailed';
     }
@@ -90,6 +96,17 @@ export function imageConditionReducer(
         status: 'ready',
       };
 
+    case 'conditionRestored':
+      return {
+        errorMessage: '',
+        file: null,
+        previewName: action.filename,
+        previewUrl: action.previewUrl,
+        run: action.run,
+        status: 'ready',
+        upload: null,
+      };
+
     case 'conditionGenerationFailed':
       return {
         ...state,
@@ -109,6 +126,10 @@ export function imageConditionReducer(
 }
 
 export function imageConditionInstruction(state: ImageConditionState): string {
+  if (state.status === 'ready') {
+    return 'Image condition is ready. Choose the next route.';
+  }
+
   if (!state.file) {
     return 'Choose, drop, or paste an input image.';
   }
@@ -119,10 +140,6 @@ export function imageConditionInstruction(state: ImageConditionState): string {
 
   if (state.status === 'generating') {
     return 'Generating image condition.';
-  }
-
-  if (state.status === 'ready') {
-    return 'Image condition is ready. Choose the next route.';
   }
 
   if (state.status === 'failed') {

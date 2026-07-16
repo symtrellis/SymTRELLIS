@@ -30,6 +30,7 @@ export type ManualSymmetryAction =
   | { type: 'confirmationStarted' }
   | { message: string; type: 'confirmationFailed' }
   | { type: 'confirmationCompleted' }
+  | { symmetry: SymmetryTuple; type: 'manualSymmetryRestored' }
   | { type: 'reset' };
 
 export const rotationSymmetryFamilies: SymmetryFamily[] = ['axial', 'T', 'O', 'I'];
@@ -198,6 +199,41 @@ export function manualSymmetryReducer(
 ): ManualSymmetryState {
   if (action.type === 'reset') {
     return initialManualSymmetryState;
+  }
+
+  if (action.type === 'manualSymmetryRestored') {
+    let family: ManualSymmetryFamily = 'axial';
+    let fold = Number.parseInt(action.symmetry.label.slice(1), 10);
+
+    if (action.symmetry.label === 'S1') {
+      family = 'reflection';
+      fold = 1;
+    } else if (action.symmetry.label.startsWith('T')) {
+      family = 'T';
+      fold = 3;
+    } else if (action.symmetry.label.startsWith('O')) {
+      family = 'O';
+      fold = 4;
+    } else if (action.symmetry.label.startsWith('I')) {
+      family = 'I';
+      fold = 5;
+    } else if (action.symmetry.label.startsWith('S')) {
+      fold /= 2;
+    }
+
+    return {
+      center: action.symmetry.center,
+      confirmationError: '',
+      confirming: false,
+      family,
+      fold,
+      labels: labelsForFamily(family, fold),
+      majorAxis: action.symmetry.majorAxis,
+      minorAxis: action.symmetry.minorAxis,
+      proposedSymmetry: action.symmetry,
+      selectedLabel: action.symmetry.label,
+      symmetryPreview: action.symmetry,
+    };
   }
 
   if (action.type === 'confirmationStarted') {

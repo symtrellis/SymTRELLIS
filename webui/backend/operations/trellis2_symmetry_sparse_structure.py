@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,8 @@ from symtrellis.flow import (
 from symtrellis.mapper import SymmetryProjector, concat_coeff
 from symtrellis.symmetry import build_symmetry_relation_inputs, get_3d_point_group
 
-from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
-from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
+from ..loaders.trellis2 import DEVICE, TRELLIS2Runtime
+from . import Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
 from .symmetry import ConfirmDetectedSymmetry, ConfirmManualSymmetry
 from .trellis2_vanilla_sparse_structure import OCC_COORDINATES, OCC_VISUALIZATION_MESH, SPARSE_STRUCTURE_LATENT
 
@@ -34,8 +35,8 @@ class Trellis2SymmetrySparseStructure(Operation):
     queue_kind = "gpu"
     output_roles = (SPARSE_STRUCTURE_LATENT, OCC_VISUALIZATION_MESH, OCC_COORDINATES)
 
-    def __init__(self, loader: TRELLIS2Loader):
-        self.loader = loader
+    def __init__(self, runtime: TRELLIS2Runtime):
+        self.runtime = runtime
 
     def resolve_inputs(self, coordinator: Any, request: Any) -> OperationInputs:
         image_condition_record = coordinator.find_lineage_node_run(
@@ -82,12 +83,12 @@ class Trellis2SymmetrySparseStructure(Operation):
             "symmetry": inputs.metadata["symmetry"],
         }
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any],
     ) -> OperationResult:
         seed = int(params["seed"])
         steps = int(params["steps"])
@@ -106,15 +107,16 @@ class Trellis2SymmetrySparseStructure(Operation):
             float(params["symmetryProjectionDuration"][1]),
         )
 
+        device = torch.device(DEVICE)
         symmetry = inputs.metadata["symmetry"]
         symmetry_label = str(symmetry["label"])
-        symmetry_center = torch.tensor(symmetry["center"], device=DEVICE, dtype=torch.float32)
-        symmetry_major_axis = torch.tensor(symmetry["majorAxis"], device=DEVICE, dtype=torch.float32)
-        symmetry_minor_axis = torch.tensor(symmetry["minorAxis"], device=DEVICE, dtype=torch.float32)
+        symmetry_center = torch.tensor(symmetry["center"], device=device, dtype=torch.float32)
+        symmetry_major_axis = torch.tensor(symmetry["majorAxis"], device=device, dtype=torch.float32)
+        symmetry_minor_axis = torch.tensor(symmetry["minorAxis"], device=device, dtype=torch.float32)
 
         condition = torch.load(inputs.paths["condition"], map_location="cpu")
 
-        ss_flow_model = self.loader.ss_flow_model
+        ss_flow_model = self.runtime.ss_flow_model
 
         batch_size = condition.shape[0]
         grid_size = ss_flow_model.resolution
@@ -133,14 +135,18 @@ class Trellis2SymmetrySparseStructure(Operation):
             grid_size=grid_size,
             device=DEVICE,
         )
-        ss_mapper = self.loader.ss_mapper
+        ss_mapper = self.runtime.ss_mapper
         ss_mapper.to(DEVICE)
 
         ss_coeff_chunks = []
         ss_rows_src_chunks = []
         ss_rows_dst_chunks = []
 
-        for relation_start in range(0, O_dst2src.shape[0], SS_MAPPER_RELATION_CHUNK_SIZE):
+        num_relation_chunks = (O_dst2src.shape[0] + SS_MAPPER_RELATION_CHUNK_SIZE - 1) // SS_MAPPER_RELATION_CHUNK_SIZE
+        progress(0.0, desc="sparse_structure_mapper")
+        for chunk_index, relation_start in enumerate(
+            range(0, O_dst2src.shape[0], SS_MAPPER_RELATION_CHUNK_SIZE),
+        ):
             relation_end = relation_start + SS_MAPPER_RELATION_CHUNK_SIZE
             chunk_relations = [
                 (
@@ -156,26 +162,29 @@ class Trellis2SymmetrySparseStructure(Operation):
                 relations=chunk_relations,
                 grid_size=grid_size,
             )
-            ss_coeff_chunks.append(
-                ss_mapper(
-                    coords_src=ss_coords_src,
-                    coords_dst=ss_coords_dst,
-                    O_dst2src=ss_O,
-                    t_dst2src=ss_t,
-                    s_dst2src=ss_s,
-                )
+            ss_coeff_chunk = ss_mapper(
+                coords_src=ss_coords_src,
+                coords_dst=ss_coords_dst,
+                O_dst2src=ss_O,
+                t_dst2src=ss_t,
+                s_dst2src=ss_s,
             )
-            ss_rows_src_chunks.append(ss_rows_src_chunk)
-            ss_rows_dst_chunks.append(ss_rows_dst_chunk)
-            del ss_coords_src, ss_coords_dst, ss_O, ss_t, ss_s
+            ss_coeff_chunks.append(ss_coeff_chunk.to(torch.device("cpu")))
+            ss_rows_src_chunks.append(ss_rows_src_chunk.cpu())
+            ss_rows_dst_chunks.append(ss_rows_dst_chunk.cpu())
+            del ss_coeff_chunk, ss_coords_src, ss_coords_dst, ss_O, ss_t, ss_s
             del ss_rows_src_chunk, ss_rows_dst_chunk, chunk_relations
+            progress(
+                0.15 * (chunk_index + 1) / num_relation_chunks,
+                desc="sparse_structure_mapper",
+            )
 
         ss_mapper.cpu()
         torch.cuda.empty_cache()
 
-        ss_coeff = concat_coeff(ss_coeff_chunks)
-        ss_rows_src = torch.cat(ss_rows_src_chunks)
-        ss_rows_dst = torch.cat(ss_rows_dst_chunks)
+        ss_coeff = concat_coeff(ss_coeff_chunks).to(device)
+        ss_rows_src = torch.cat(ss_rows_src_chunks).to(device)
+        ss_rows_dst = torch.cat(ss_rows_dst_chunks).to(device)
 
         ss_projector = SymmetryProjector(
             num_rows=ss_coords.shape[0],
@@ -226,44 +235,40 @@ class Trellis2SymmetrySparseStructure(Operation):
 
         flow_solver = EulerSolver()
         sparse_structure_latent = noise
-        for step_index, step in enumerate(
-            flow_solver.iter_steps(
-                noise=noise,
-                predictor=spg_predictor,
-                steps=steps,
-                predictor_args={
-                    "cond": condition,
-                    "neg_cond": neg_condition,
-                    "projector": ss_projector,
-                    "to_sparse_view": ss_view.to_sparse_view,
-                    "to_original_view": ss_view.to_original_view,
-                    "self_include": True,
-                },
-                sigma_min=1e-5,
-                rescale_t=time_step_rescale,
-            ),
+        for step in flow_solver.iter_steps(
+            noise=noise,
+            predictor=spg_predictor,
+            steps=steps,
+            predictor_args={
+                "cond": condition,
+                "neg_cond": neg_condition,
+                "projector": ss_projector,
+                "to_sparse_view": ss_view.to_sparse_view,
+                "to_original_view": ss_view.to_original_view,
+                "self_include": True,
+            },
+            sigma_min=1e-5,
+            rescale_t=time_step_rescale,
         ):
             sparse_structure_latent = step.x_t
-            if step_index > 0:
-                await emit(
-                    {
-                        "type": "progress",
-                        "progress": float(step.t),
-                    },
-                )
+            progress(
+                0.15 + 0.70 * float(step.t),
+                desc="sparse_structure_flow",
+            )
 
+        sparse_structure_latent = sparse_structure_latent.cpu()
         ss_flow_model.cpu()
-        condition = condition.cpu()
-        neg_condition = neg_condition.cpu()
         del ss_projector, ss_coeff, ss_coeff_chunks, ss_coords
         del ss_rows_src, ss_rows_dst, ss_rows_src_chunks, ss_rows_dst_chunks
-        del ss_view
-        del O_dst2src, t_dst2src, s_dst2src
+        del ss_view, condition, neg_condition, noise, noise_sampler
+        del flow_predictor, cfg_predictor, spg_predictor, flow_solver, step
+        del O_dst2src, t_dst2src, s_dst2src, symmetry_center, symmetry_major_axis, symmetry_minor_axis
         torch.cuda.empty_cache()
 
-        ss_decoder = self.loader.ss_decoder
+        ss_decoder = self.runtime.ss_decoder
         ss_decoder.to(DEVICE)
-        occ_logits = ss_decoder(sparse_structure_latent.to(DEVICE))
+        sparse_structure_latent = sparse_structure_latent.to(DEVICE)
+        occ_logits = ss_decoder(sparse_structure_latent)
         occ = occ_logits > 0
         pool_size = occ_logits.shape[-1] // 32
         occ_32 = torch.nn.functional.max_pool3d(occ.float(), pool_size, pool_size, 0) > 0.5
@@ -273,10 +278,12 @@ class Trellis2SymmetrySparseStructure(Operation):
         )
         occ_visualization_mesh = trellis2_occ_to_visualization_mesh(occ_32[0, 0], y_up=True)
 
-        ss_decoder.cpu()
         sparse_structure_latent = sparse_structure_latent.cpu()
         occ_coordinates = occ_coordinates.cpu()
+        ss_decoder.cpu()
+        del occ_logits, occ, occ_32
         torch.cuda.empty_cache()
+        progress(1.0, desc="sparse_structure_decode")
 
         sparse_structure_latent_path = context.work_dir / "sparse_structure_latent.pt"
         occ_coordinates_path = context.work_dir / "occ_coordinates.pt"

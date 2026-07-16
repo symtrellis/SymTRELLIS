@@ -1,5 +1,6 @@
-import asyncio
 import json
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from trellis2.representations.mesh import Mesh
 from inference.trellis2 import trelli2_mesh_to_glb
 
 from ..loaders.trellis2 import DEVICE
-from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
+from . import Operation, OperationContext, OperationInputs, OperationOutput, OperationResult, forward_glb_progress
 from .symmetry import ConfirmDetectedSymmetry, ConfirmManualSymmetry
 from .trellis2_image_condition import IMAGE_CONDITION_512, IMAGE_CONDITION_1024, IMAGE_PNG, Trellis2ImageCondition
 from .trellis2_symmetry_shape import Trellis2SymmetryShape
@@ -78,10 +79,7 @@ class Trellis2ExportGlb(Operation):
             raise ValueError("trellis2.export_glb requires trellis2.image_condition")
 
         symmetry_record = None
-        if (
-            sparse_structure_record["operation_id"] == Trellis2SymmetrySparseStructure.operation_id
-            or shape_record["operation_id"] == Trellis2SymmetryShape.operation_id
-        ):
+        if sparse_structure_record["operation_id"] == Trellis2SymmetrySparseStructure.operation_id or shape_record["operation_id"] == Trellis2SymmetryShape.operation_id:
             for run_key in reversed(shape_record["ancestor_run_keys"]):
                 run = coordinator.storage.read_node_run(run_key)
                 if run is not None and run["operation_id"] == ConfirmDetectedSymmetry.operation_id:
@@ -183,12 +181,12 @@ class Trellis2ExportGlb(Operation):
             ),
         }
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any],
     ) -> OperationResult:
         face_decimation_target = int(params["faceDecimationTarget"])
         remesh = bool(params["remesh"])
@@ -211,30 +209,15 @@ class Trellis2ExportGlb(Operation):
         if has_texture:
             pbr_voxel_payload = torch.load(inputs.paths[PBR_VOXEL], map_location="cpu")
             pbr_voxel = SparseTensor(
-                coords=pbr_voxel_payload["coords"].to(DEVICE),
-                feats=pbr_voxel_payload["feats"].to(DEVICE),
-        )
+                coords=pbr_voxel_payload["coords"],
+                feats=pbr_voxel_payload["feats"],
+            )
 
         glb_path = context.work_dir / "model.glb"
         config_path = context.work_dir / "config.json"
 
-        loop = asyncio.get_running_loop()
-
-        def report_glb(update: dict[str, Any]) -> None:
-            asyncio.run_coroutine_threadsafe(
-                emit(
-                    {
-                        "type": "progress",
-                        "progress": float(update["progress"]),
-                        "stage": update["stage"],
-                    },
-                ),
-                loop,
-            )
-
-        await emit({"type": "progress", "progress": 0.0, "stage": "export_start"})
-        glb_mesh = await asyncio.to_thread(
-            trelli2_mesh_to_glb,
+        progress(0.0, desc="export_start")
+        glb_mesh = trelli2_mesh_to_glb(
             shape_mesh=shape_mesh,
             res=o_voxel_grid_size,
             device=torch.device(DEVICE),
@@ -244,11 +227,13 @@ class Trellis2ExportGlb(Operation):
             decimation_target=face_decimation_target,
             remesh_band=remesh_band,
             remesh_project=remesh_project,
-            report=report_glb,
+            report=partial(forward_glb_progress, progress, 0.0, 1.0),
         )
         glb_mesh.export(glb_path)
 
-        pbr_voxel = None
+        if has_texture:
+            pbr_voxel = pbr_voxel.cpu()
+        del shape_mesh, glb_mesh
         torch.cuda.empty_cache()
 
         image_condition_record = inputs.records["image_condition"]
@@ -256,26 +241,14 @@ class Trellis2ExportGlb(Operation):
         shape_record = inputs.records["shape"]
         texture_record = inputs.records.get("texture")
         symmetry_record = inputs.records.get("symmetry")
-        sparse_structure_kind = (
-            "symmetry"
-            if sparse_structure_record["operation_id"] == Trellis2SymmetrySparseStructure.operation_id
-            else "vanilla"
-        )
-        shape_kind = (
-            "symmetry"
-            if shape_record["operation_id"] == Trellis2SymmetryShape.operation_id
-            else "vanilla"
-        )
+        sparse_structure_kind = "symmetry" if sparse_structure_record["operation_id"] == Trellis2SymmetrySparseStructure.operation_id else "vanilla"
+        shape_kind = "symmetry" if shape_record["operation_id"] == Trellis2SymmetryShape.operation_id else "vanilla"
         if symmetry_record is None:
             symmetry_config = {"enabled": False}
         else:
             symmetry_config = {
                 "enabled": True,
-                "source": (
-                    "detected"
-                    if symmetry_record["operation_id"] == ConfirmDetectedSymmetry.operation_id
-                    else "manual"
-                ),
+                "source": ("detected" if symmetry_record["operation_id"] == ConfirmDetectedSymmetry.operation_id else "manual"),
                 "tuple": symmetry_record["json_result"],
             }
         texture_config = (

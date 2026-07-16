@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,8 @@ from inference.trellis2 import (
 )
 from symtrellis.flow import ClassifierFreeGuidanceWrapper, EulerSolver
 
-from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
-from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
+from ..loaders.trellis2 import DEVICE, TRELLIS2Runtime
+from . import Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
 
 OCC_COORDINATES = "occ_coordinates"
 OCC_VISUALIZATION_MESH = "occ_visualization_mesh"
@@ -25,8 +26,8 @@ class Trellis2VanillaSparseStructure(Operation):
     queue_kind = "gpu"
     output_roles = (SPARSE_STRUCTURE_LATENT, OCC_VISUALIZATION_MESH, OCC_COORDINATES)
 
-    def __init__(self, loader: TRELLIS2Loader):
-        self.loader = loader
+    def __init__(self, runtime: TRELLIS2Runtime):
+        self.runtime = runtime
 
     def resolve_inputs(self, coordinator: Any, request: Any) -> OperationInputs:
         image_condition_record = coordinator.find_lineage_node_run(
@@ -55,12 +56,12 @@ class Trellis2VanillaSparseStructure(Operation):
             "image_condition_role": "image_condition_512",
         }
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any],
     ) -> OperationResult:
         seed = int(params["seed"])
         steps = int(params["steps"])
@@ -74,7 +75,7 @@ class Trellis2VanillaSparseStructure(Operation):
 
         condition = torch.load(inputs.paths["condition"], map_location="cpu")
 
-        ss_flow_model = self.loader.ss_flow_model
+        ss_flow_model = self.runtime.ss_flow_model
         ss_flow_model.to(DEVICE)
         condition = condition.to(DEVICE)
         neg_condition = torch.zeros_like(condition)
@@ -98,36 +99,30 @@ class Trellis2VanillaSparseStructure(Operation):
 
         flow_solver = EulerSolver()
         sparse_structure_latent = noise
-        for step_index, step in enumerate(
-            flow_solver.iter_steps(
-                noise=noise,
-                predictor=cfg_predictor,
-                steps=steps,
-                predictor_args={
-                    "cond": condition,
-                    "neg_cond": neg_condition,
-                },
-                sigma_min=1e-5,
-                rescale_t=time_step_rescale,
-            ),
+        progress(0.0, desc="sparse_structure_flow")
+        for step in flow_solver.iter_steps(
+            noise=noise,
+            predictor=cfg_predictor,
+            steps=steps,
+            predictor_args={
+                "cond": condition,
+                "neg_cond": neg_condition,
+            },
+            sigma_min=1e-5,
+            rescale_t=time_step_rescale,
         ):
             sparse_structure_latent = step.x_t
-            if step_index > 0:
-                await emit(
-                    {
-                        "type": "progress",
-                        "progress": float(step.t),
-                    },
-                )
+            progress(0.80 * float(step.t), desc="sparse_structure_flow")
 
+        sparse_structure_latent = sparse_structure_latent.cpu()
         ss_flow_model.cpu()
-        condition = condition.cpu()
-        neg_condition = neg_condition.cpu()
+        del condition, neg_condition, noise, flow_predictor, cfg_predictor, flow_solver, step
         torch.cuda.empty_cache()
 
-        ss_decoder = self.loader.ss_decoder
+        ss_decoder = self.runtime.ss_decoder
         ss_decoder.to(DEVICE)
-        occ_logits = ss_decoder(sparse_structure_latent.to(DEVICE))
+        sparse_structure_latent = sparse_structure_latent.to(DEVICE)
+        occ_logits = ss_decoder(sparse_structure_latent)
         occ = occ_logits > 0
         pool_size = occ_logits.shape[-1] // 32
         occ_32 = torch.nn.functional.max_pool3d(occ.float(), pool_size, pool_size, 0) > 0.5
@@ -137,10 +132,12 @@ class Trellis2VanillaSparseStructure(Operation):
         )
         occ_visualization_mesh = trellis2_occ_to_visualization_mesh(occ_32[0, 0], y_up=True)
 
-        ss_decoder.cpu()
         sparse_structure_latent = sparse_structure_latent.cpu()
         occ_coordinates = occ_coordinates.cpu()
+        ss_decoder.cpu()
+        del occ_logits, occ, occ_32
         torch.cuda.empty_cache()
+        progress(1.0, desc="sparse_structure_decode")
 
         sparse_structure_latent_path = context.work_dir / "sparse_structure_latent.pt"
         occ_coordinates_path = context.work_dir / "occ_coordinates.pt"

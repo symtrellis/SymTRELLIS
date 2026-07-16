@@ -14,7 +14,14 @@ export type RequestId = string;
 
 export type SessionId = string;
 
+export type SessionRevision = number;
+
 export type OutputRole = string;
+
+export type ExecutionProgress = {
+  progress: number;
+  stage: string;
+};
 
 export type UploadRef = {
   contentHash: string;
@@ -37,6 +44,7 @@ export type NodeRunResult = {
   metadata: Record<string, unknown>;
   outputs: Record<OutputRole, OutputRef>;
   sessionId: SessionId;
+  sessionRevision: SessionRevision;
 };
 
 export type ActionResult<JsonResult = unknown> = {
@@ -46,6 +54,7 @@ export type ActionResult<JsonResult = unknown> = {
   metadata: Record<string, unknown>;
   outputs: Record<OutputRole, OutputRef>;
   sessionId: SessionId;
+  sessionRevision: SessionRevision;
 };
 
 export type NodeRunRecord = {
@@ -79,6 +88,7 @@ export type RestoredSessionRef = {
   modelId: string;
   nodeRuns: NodeRunRecord[];
   sessionId: SessionId;
+  sessionRevision: SessionRevision;
 };
 
 export type SymmetryFamily = 'axial' | 'T' | 'O' | 'I';

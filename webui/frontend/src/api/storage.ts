@@ -1,3 +1,4 @@
+import { handle_file } from '@gradio/client';
 import type {
   ActionKey,
   NodeRunKey,
@@ -6,7 +7,7 @@ import type {
   UploadKey,
   UploadRef,
 } from '../types';
-import { postForm, type ApiResult } from './client';
+import { submitApi, type ApiResult } from './client';
 
 export type BackendOutputRef = {
   filename: string;
@@ -24,10 +25,9 @@ export async function uploadInputImage(
   file: Blob | File,
   filename: string,
 ): Promise<ApiResult<UploadRef>> {
-  const formData = new FormData();
-  formData.append('file', file, filename);
-
-  const result = await postForm<BackendUploadResponse>('/uploads', formData);
+  const result = await submitApi<BackendUploadResponse>('/upload', {
+    file: handle_file(new Blob([file], { type: file.type })),
+  });
   if (!result.ok) {
     return result;
   }
@@ -36,7 +36,7 @@ export async function uploadInputImage(
     ok: true,
     value: {
       contentHash: result.value.content_hash,
-      filename: result.value.filename,
+      filename,
       mimeType: result.value.mime_type,
       uploadKey: result.value.upload_key as UploadKey,
     },

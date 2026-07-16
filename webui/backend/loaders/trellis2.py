@@ -38,139 +38,139 @@ SPARSE_STRUCTURE_MAPPER = "trellis2_sparse_structure_neighbor_graph_finetune"
 SHAPE_MAPPER = "trellis2_shape_neighbor_graph_pretrain"
 
 
-class TRELLIS2Loader:
+class TRELLIS2Runtime:
     def __init__(self):
-        self.loaded_image_cond_model: DinoV3FeatureExtractor | None = None
-        self.loaded_rembg_model: BiRefNet | None = None
+        self._image_cond_model: DinoV3FeatureExtractor | None = None
+        self._rembg_model: BiRefNet | None = None
 
-        self.loaded_ss_flow_model: SparseStructureFlowModel | None = None
-        self.loaded_ss_decoder: SparseStructureDecoder | None = None
+        self._ss_flow_model: SparseStructureFlowModel | None = None
+        self._ss_decoder: SparseStructureDecoder | None = None
 
-        self.loaded_shape_flow_model_512: ElasticSLatFlowModel | None = None
-        self.loaded_shape_flow_model_1024: ElasticSLatFlowModel | None = None
-        self.loaded_shape_decoder: FlexiDualGridVaeDecoder | None = None
+        self._shape_flow_model_512: ElasticSLatFlowModel | None = None
+        self._shape_flow_model_1024: ElasticSLatFlowModel | None = None
+        self._shape_decoder: FlexiDualGridVaeDecoder | None = None
 
-        self.loaded_texture_flow_model_512: ElasticSLatFlowModel | None = None
-        self.loaded_texture_flow_model_1024: ElasticSLatFlowModel | None = None
-        self.loaded_texture_decoder: SparseUnetVaeDecoder | None = None
+        self._texture_flow_model_512: ElasticSLatFlowModel | None = None
+        self._texture_flow_model_1024: ElasticSLatFlowModel | None = None
+        self._texture_decoder: SparseUnetVaeDecoder | None = None
 
-        self.loaded_ss_mapper: BaseSpatialTransformLatentMapper | None = None
-        self.loaded_shape_mapper: BaseSpatialTransformLatentMapper | None = None
+        self._ss_mapper: BaseSpatialTransformLatentMapper | None = None
+        self._shape_mapper: BaseSpatialTransformLatentMapper | None = None
 
     @property
     def image_cond_model(self) -> DinoV3FeatureExtractor:
-        if self.loaded_image_cond_model is None:
-            self.loaded_image_cond_model = DinoV3FeatureExtractor(IMAGE_COND_MODEL, image_size=512)
-            self.loaded_image_cond_model.model.eval()
+        if self._image_cond_model is None:
+            self._image_cond_model = DinoV3FeatureExtractor(IMAGE_COND_MODEL, image_size=512)
+            self._image_cond_model.model.eval()
 
-        return self.loaded_image_cond_model
+        return self._image_cond_model
 
     @property
     def rembg_model(self) -> BiRefNet:
-        if self.loaded_rembg_model is None:
-            self.loaded_rembg_model = BiRefNet(REMBG_MODEL)
-            self.loaded_rembg_model.model.eval()
+        if self._rembg_model is None:
+            self._rembg_model = BiRefNet(REMBG_MODEL)
+            self._rembg_model.model.eval()
 
-        return self.loaded_rembg_model
+        return self._rembg_model
 
     @property
     def ss_flow_model(self) -> SparseStructureFlowModel:
-        if self.loaded_ss_flow_model is None:
-            self.loaded_ss_flow_model = cast(
+        if self._ss_flow_model is None:
+            self._ss_flow_model = cast(
                 SparseStructureFlowModel,
                 trellis2_model_registry.from_pretrained(SS_FLOW_MODEL).eval(),
             )
 
-        return self.loaded_ss_flow_model
+        return self._ss_flow_model
 
     @property
     def ss_decoder(self) -> SparseStructureDecoder:
-        if self.loaded_ss_decoder is None:
-            self.loaded_ss_decoder = cast(
+        if self._ss_decoder is None:
+            self._ss_decoder = cast(
                 SparseStructureDecoder,
                 trellis2_model_registry.from_pretrained(SS_DECODER).eval(),
             )
 
-        return self.loaded_ss_decoder
+        return self._ss_decoder
 
     @property
     def shape_flow_model_512(self) -> ElasticSLatFlowModel:
-        if self.loaded_shape_flow_model_512 is None:
-            self.loaded_shape_flow_model_512 = cast(
+        if self._shape_flow_model_512 is None:
+            self._shape_flow_model_512 = cast(
                 ElasticSLatFlowModel,
                 trellis2_model_registry.from_pretrained(SHAPE_FLOW_512).eval(),
             )
 
-        return self.loaded_shape_flow_model_512
+        return self._shape_flow_model_512
 
     @property
     def shape_flow_model_1024(self) -> ElasticSLatFlowModel:
-        if self.loaded_shape_flow_model_1024 is None:
-            self.loaded_shape_flow_model_1024 = cast(
+        if self._shape_flow_model_1024 is None:
+            self._shape_flow_model_1024 = cast(
                 ElasticSLatFlowModel,
                 trellis2_model_registry.from_pretrained(SHAPE_FLOW_1024).eval(),
             )
 
-        return self.loaded_shape_flow_model_1024
+        return self._shape_flow_model_1024
 
     @property
     def shape_decoder(self) -> FlexiDualGridVaeDecoder:
-        if self.loaded_shape_decoder is None:
-            self.loaded_shape_decoder = cast(
+        if self._shape_decoder is None:
+            self._shape_decoder = cast(
                 FlexiDualGridVaeDecoder,
                 trellis2_model_registry.from_pretrained(SHAPE_DECODER).eval(),
             )
 
-        return self.loaded_shape_decoder
+        return self._shape_decoder
 
     @property
     def texture_flow_model_512(self) -> ElasticSLatFlowModel:
-        if self.loaded_texture_flow_model_512 is None:
-            self.loaded_texture_flow_model_512 = cast(
+        if self._texture_flow_model_512 is None:
+            self._texture_flow_model_512 = cast(
                 ElasticSLatFlowModel,
                 trellis2_model_registry.from_pretrained(TEXTURE_FLOW_512).eval(),
             )
 
-        return self.loaded_texture_flow_model_512
+        return self._texture_flow_model_512
 
     @property
     def texture_flow_model_1024(self) -> ElasticSLatFlowModel:
-        if self.loaded_texture_flow_model_1024 is None:
-            self.loaded_texture_flow_model_1024 = cast(
+        if self._texture_flow_model_1024 is None:
+            self._texture_flow_model_1024 = cast(
                 ElasticSLatFlowModel,
                 trellis2_model_registry.from_pretrained(TEXTURE_FLOW_1024).eval(),
             )
 
-        return self.loaded_texture_flow_model_1024
+        return self._texture_flow_model_1024
 
     @property
     def texture_decoder(self) -> SparseUnetVaeDecoder:
-        if self.loaded_texture_decoder is None:
-            self.loaded_texture_decoder = cast(
+        if self._texture_decoder is None:
+            self._texture_decoder = cast(
                 SparseUnetVaeDecoder,
                 trellis2_model_registry.from_pretrained(TEXTURE_DECODER).eval(),
             )
 
-        return self.loaded_texture_decoder
+        return self._texture_decoder
 
     @property
     def ss_mapper(self) -> BaseSpatialTransformLatentMapper:
-        if self.loaded_ss_mapper is None:
-            self.loaded_ss_mapper = from_pretrained(
+        if self._ss_mapper is None:
+            self._ss_mapper = from_pretrained(
                 SPARSE_STRUCTURE_MAPPER,
                 repo_id=SYMTRELLIS_REPO,
                 device="cpu",
             ).eval()
 
-        return self.loaded_ss_mapper
+        return self._ss_mapper
 
     @property
     def shape_mapper(self) -> BaseSpatialTransformLatentMapper:
-        if self.loaded_shape_mapper is None:
-            self.loaded_shape_mapper = from_pretrained(
+        if self._shape_mapper is None:
+            self._shape_mapper = from_pretrained(
                 SHAPE_MAPPER,
                 repo_id=SYMTRELLIS_REPO,
                 device="cpu",
             ).eval()
 
-        return self.loaded_shape_mapper
+        return self._shape_mapper

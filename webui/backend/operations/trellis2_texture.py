@@ -1,4 +1,5 @@
-import asyncio
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +16,8 @@ from inference.trellis2 import (
 )
 from symtrellis.flow import ClassifierFreeGuidanceWrapper, EulerSolver
 
-from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
-from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
+from ..loaders.trellis2 import DEVICE, TRELLIS2Runtime
+from . import Operation, OperationContext, OperationInputs, OperationOutput, OperationResult, forward_glb_progress
 from .trellis2_image_condition import IMAGE_CONDITION_512, IMAGE_CONDITION_1024, Trellis2ImageCondition
 from .trellis2_symmetry_shape import Trellis2SymmetryShape
 from .trellis2_vanilla_shape import SHAPE_LATENT, SHAPE_RAW_MESH, Trellis2VanillaShape
@@ -32,8 +33,8 @@ class Trellis2Texture(Operation):
     queue_kind = "gpu"
     output_roles = (TEXTURE_LATENT, PBR_VOXEL, FULL_VISUALIZATION_MESH)
 
-    def __init__(self, loader: TRELLIS2Loader):
-        self.loader = loader
+    def __init__(self, runtime: TRELLIS2Runtime):
+        self.runtime = runtime
 
     def resolve_inputs(self, coordinator: Any, request: Any) -> OperationInputs:
         image_condition_record = coordinator.find_lineage_node_run(
@@ -93,12 +94,12 @@ class Trellis2Texture(Operation):
             "shape_roles": [SHAPE_LATENT, SHAPE_RAW_MESH],
         }
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any],
     ) -> OperationResult:
         seed = int(params["seed"])
         steps = int(params["steps"])
@@ -117,10 +118,10 @@ class Trellis2Texture(Operation):
 
         if shape_latent_grid_size == 32:
             condition = torch.load(inputs.paths[IMAGE_CONDITION_512], map_location="cpu")
-            texture_flow_model = self.loader.texture_flow_model_512
+            texture_flow_model = self.runtime.texture_flow_model_512
         else:
             condition = torch.load(inputs.paths[IMAGE_CONDITION_1024], map_location="cpu")
-            texture_flow_model = self.loader.texture_flow_model_1024
+            texture_flow_model = self.runtime.texture_flow_model_1024
 
         shape_payload = torch.load(inputs.paths[SHAPE_LATENT], map_location="cpu")
         normalized_shape_latent = trellis2_shape_sparse_view_to_latent(
@@ -155,33 +156,31 @@ class Trellis2Texture(Operation):
         flow_solver = EulerSolver()
         normalized_texture_latent = normalized_texture_noise
 
-        await emit({"type": "progress", "progress": 0.0})
-        for step_index, step in enumerate(
-            flow_solver.iter_steps(
-                noise=normalized_texture_noise,
-                predictor=cfg_predictor,
-                steps=steps,
-                predictor_args={
-                    "cond": condition,
-                    "neg_cond": neg_condition,
-                    "concat_cond": normalized_shape_latent,
-                },
-                sigma_min=1e-5,
-                rescale_t=time_step_rescale,
-            ),
+        progress(0.0, desc="texture_flow")
+        for step in flow_solver.iter_steps(
+            noise=normalized_texture_noise,
+            predictor=cfg_predictor,
+            steps=steps,
+            predictor_args={
+                "cond": condition,
+                "neg_cond": neg_condition,
+                "concat_cond": normalized_shape_latent,
+            },
+            sigma_min=1e-5,
+            rescale_t=time_step_rescale,
         ):
             normalized_texture_latent = step.x_t
-            if step_index > 0:
-                await emit({"type": "progress", "progress": float(step.t)})
+            progress(0.55 * float(step.t), desc="texture_flow")
 
         texture_latent = normalized_texture_latent.replace(
             trellis2_texture_latent_to_sparse_view(normalized_texture_latent),
         )
 
+        texture_latent = texture_latent.cpu()
         texture_flow_model.cpu()
-        condition = condition.cpu()
-        neg_condition = neg_condition.cpu()
-        normalized_shape_latent = normalized_shape_latent.cpu()
+        del condition, neg_condition, normalized_shape_latent
+        del noise_sampler, normalized_texture_noise, normalized_texture_latent
+        del flow_predictor, cfg_predictor, flow_solver, step
         torch.cuda.empty_cache()
 
         raw_mesh_payload = torch.load(inputs.paths[SHAPE_RAW_MESH], map_location="cpu")
@@ -194,14 +193,19 @@ class Trellis2Texture(Operation):
             for item in raw_mesh_payload["shape_subs"]
         ]
 
-        texture_decoder = self.loader.texture_decoder
+        texture_decoder = self.runtime.texture_decoder
         texture_decoder.to(DEVICE)
 
+        texture_latent = texture_latent.to(DEVICE)
+        progress(0.55, desc="texture_decode")
         pbr_voxel = texture_decoder(texture_latent, guide_subs=shape_subs) * 0.5 + 0.5
 
         texture_latent = texture_latent.cpu()
+        pbr_voxel = pbr_voxel.cpu()
+        del shape_subs
         texture_decoder.cpu()
         torch.cuda.empty_cache()
+        progress(0.65, desc="texture_decode")
 
         texture_latent_path = context.work_dir / "texture_latent.pt"
         pbr_voxel_path = context.work_dir / "pbr_voxel.pt"
@@ -212,23 +216,7 @@ class Trellis2Texture(Operation):
             faces=raw_mesh_payload["faces"],
         )
 
-        loop = asyncio.get_running_loop()
-
-        def report_glb(update: dict[str, Any]) -> None:
-            asyncio.run_coroutine_threadsafe(
-                emit(
-                    {
-                        "type": "progress",
-                        "progress": float(update["progress"]),
-                        "stage": update["stage"],
-                    },
-                ),
-                loop,
-            )
-
-        await emit({"type": "progress", "progress": 0.0})
-        full_visualization_mesh = await asyncio.to_thread(
-            trelli2_mesh_to_glb,
+        full_visualization_mesh = trelli2_mesh_to_glb(
             shape_mesh=shape_raw_mesh,
             res=o_voxel_grid_size,
             device=torch.device(DEVICE),
@@ -238,11 +226,13 @@ class Trellis2Texture(Operation):
             decimation_target=100_000,
             remesh_band=1.0,
             remesh_project=0.0,
-            report=report_glb,
+            report=partial(forward_glb_progress, progress, 0.65, 0.35),
         )
         full_visualization_mesh.export(full_visualization_mesh_path)
 
         pbr_voxel = pbr_voxel.cpu()
+        del shape_raw_mesh
+        torch.cuda.empty_cache()
         texture_voxel_count = int(pbr_voxel.coords.shape[0])
 
         torch.save(

@@ -30,6 +30,7 @@ type SymmetryGenerationParametersProps = {
 type GenerationStatusBlockProps = {
   metadata: Array<{ label: string; value: number | string }>;
   progress: number;
+  stage?: string;
   status: GenerationStatus;
 };
 
@@ -164,6 +165,7 @@ export function GenerationParameters({
 export function GenerationStatusBlock({
   metadata,
   progress,
+  stage,
   status,
 }: GenerationStatusBlockProps) {
   if (status === 'idle') {
@@ -181,6 +183,8 @@ export function GenerationStatusBlock({
         </div>
         <span>{Math.round(progress * 100)}%</span>
       </div>
+
+      <p>{stage ?? status}</p>
 
       {status === 'ready' && metadata.length > 0 ? (
         <dl className="generation-metadata">

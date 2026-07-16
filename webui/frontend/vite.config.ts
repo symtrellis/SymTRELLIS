@@ -5,14 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/actions': 'http://127.0.0.1:8000',
-      '/node-runs': 'http://127.0.0.1:8000',
-      '/sessions': 'http://127.0.0.1:8000',
-      '/uploads': 'http://127.0.0.1:8000',
-      '/ws': {
-        target: 'ws://127.0.0.1:8000',
-        ws: true,
-      },
+      '/actions': 'http://127.0.0.1:7860',
+      '/config': 'http://127.0.0.1:7860',
+      '/gradio_api': 'http://127.0.0.1:7860',
+      '/health': 'http://127.0.0.1:7860',
+      '/node-runs': 'http://127.0.0.1:7860',
     },
   },
 });

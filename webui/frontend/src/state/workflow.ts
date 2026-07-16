@@ -8,6 +8,7 @@ import type {
   OutputRole,
   RestoredSessionRef,
   SessionId,
+  SessionRevision,
 } from '../types';
 import type {
   EnabledModelId,
@@ -22,7 +23,9 @@ export type WorkflowNodeRun = {
   jsonResult: unknown;
   key: NodeRunKey;
   metadata: Record<string, unknown>;
+  operationId: OperationId;
   outputs: Record<OutputRole, OutputRef>;
+  params: Record<string, unknown>;
 };
 
 export type WorkflowActionRun = {
@@ -31,6 +34,7 @@ export type WorkflowActionRun = {
   metadata: Record<string, unknown>;
   operationId: OperationId;
   outputs: Record<OutputRole, OutputRef>;
+  params: Record<string, unknown>;
 };
 
 export type WorkflowHistoryEntry = {
@@ -46,6 +50,7 @@ export type WorkflowState = {
   nodeRunsByNode: Record<NodeInstanceId, WorkflowNodeRun>;
   selectedModelId: EnabledModelId;
   sessionId: SessionId | null;
+  sessionRevision: SessionRevision;
 };
 
 export type WorkflowBackTransition = {
@@ -68,6 +73,7 @@ export function createInitialWorkflowState(): WorkflowState {
     nodeRunsByNode: {},
     selectedModelId: 'trellis2',
     sessionId: null,
+    sessionRevision: 0,
   };
 }
 
@@ -81,6 +87,7 @@ export function enterModelDag(state: WorkflowState, model: ModelSpec): WorkflowS
     nodeRunsByNode: {},
     selectedModelId: model.id,
     sessionId: null,
+    sessionRevision: 0,
   };
 }
 
@@ -149,6 +156,8 @@ export function goBackWorkflowNode(state: WorkflowState): WorkflowBackTransition
 export function completeWorkflowNode(
   state: WorkflowState,
   nodeId: NodeInstanceId,
+  operationId: OperationId,
+  params: Record<string, unknown>,
   result: NodeRunResult,
 ): WorkflowState {
   const nodeIndex = state.nodeHistory.findIndex((entry) => entry.nodeId === nodeId);
@@ -178,10 +187,13 @@ export function completeWorkflowNode(
         jsonResult: result.jsonResult,
         key: result.key,
         metadata: result.metadata,
+        operationId,
         outputs: result.outputs,
+        params,
       },
     },
     sessionId: result.sessionId,
+    sessionRevision: result.sessionRevision,
   };
 }
 
@@ -202,6 +214,7 @@ export function recordWorkflowAction(
   state: WorkflowState,
   sourceRunKey: NodeRunKey,
   operationId: OperationId,
+  params: Record<string, unknown>,
   result: ActionResult,
 ): WorkflowState {
   const actionRun: WorkflowActionRun = {
@@ -210,6 +223,7 @@ export function recordWorkflowAction(
     metadata: result.metadata,
     operationId,
     outputs: result.outputs,
+    params,
   };
 
   return {
@@ -221,6 +235,7 @@ export function recordWorkflowAction(
         actionRun,
       ],
     },
+    sessionRevision: result.sessionRevision,
   };
 }
 
@@ -317,7 +332,9 @@ export function restoreWorkflowSession(
         jsonResult: nodeRun.jsonResult,
         key: nodeRun.key,
         metadata: nodeRun.metadata,
+        operationId: nodeRun.operationId as OperationId,
         outputs: nodeRun.outputs,
+        params: nodeRun.params,
       };
       nodeHistory.push({ edgeId: edge?.id ?? null, nodeId: node.id });
     }
@@ -351,6 +368,7 @@ export function restoreWorkflowSession(
         metadata: action.metadata,
         operationId: action.operationId,
         outputs: action.outputs,
+        params: action.params,
       })),
     ]),
   );
@@ -363,5 +381,6 @@ export function restoreWorkflowSession(
     nodeRunsByNode,
     selectedModelId: model.id,
     sessionId: restored.sessionId,
+    sessionRevision: restored.sessionRevision,
   };
 }

@@ -24,6 +24,7 @@ export type GenerationRunState = {
   progress: number;
   requestId: RequestId | null;
   result: NodeRunResult | null;
+  stage?: string;
   status: GenerationStatus;
 };
 
@@ -48,10 +49,12 @@ export type GenerationAction<Params extends CommonGenerationParams, Metadata> =
   | {
       progress: number;
       requestId: RequestId;
+      stage: string;
       type: 'generationProgressUpdated';
     }
   | {
       metadata: Metadata;
+      requestId: RequestId;
       result: NodeRunResult;
       type: 'generationCompleted';
     }
@@ -64,6 +67,12 @@ export type GenerationAction<Params extends CommonGenerationParams, Metadata> =
       metadata: Metadata;
       params: Params;
       type: 'resetToNodeStart';
+    }
+  | {
+      metadata: Metadata;
+      params: Params;
+      result: NodeRunResult;
+      type: 'generationRestored';
     };
 
 export function createInitialGenerationState<Params extends CommonGenerationParams, Metadata>(
@@ -142,10 +151,15 @@ export function generationReducer<Params extends CommonGenerationParams, Metadat
         run: {
           ...state.run,
           progress: Math.min(1, Math.max(0, action.progress)),
+          stage: action.stage,
         },
       };
 
     case 'generationCompleted':
+      if (action.requestId !== state.run.requestId) {
+        return state;
+      }
+
       return {
         ...state,
         metadata: action.metadata,
@@ -154,6 +168,21 @@ export function generationReducer<Params extends CommonGenerationParams, Metadat
           progress: 1,
           requestId: null,
           result: action.result,
+          stage: undefined,
+          status: 'ready',
+        },
+      };
+
+    case 'generationRestored':
+      return {
+        metadata: action.metadata,
+        params: action.params,
+        run: {
+          errorMessage: '',
+          progress: 1,
+          requestId: null,
+          result: action.result,
+          stage: undefined,
           status: 'ready',
         },
       };

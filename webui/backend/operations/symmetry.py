@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from symtrellis.detection.intrinsic import build_intrinsic_basis
 from symtrellis.detection.sampling import sample_mesh_farthest_points
 
 from ..loaders.trellis2 import DEVICE
-from . import Emit, Operation, OperationContext, OperationInputs, OperationResult
+from . import Operation, OperationContext, OperationInputs, OperationResult
 from .trellis2_vanilla_shape import SHAPE_VISUALIZATION_MESH, Trellis2VanillaShape
 
 DETECTION_NUM_SAMPLES = 8192
@@ -24,6 +25,42 @@ DETECTION_INTRINSIC_DIM = 64
 DETECTION_NUM_ICP_ITER = 128
 DETECTION_NUM_ICP_INIT = 512
 DETECTION_MAX_FOLD = 30
+
+
+def load_detection_basis(
+    mesh_path: Path,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    mesh = trimesh.load_mesh(mesh_path, file_type="glb")
+    vertices_y_up = torch.as_tensor(
+        mesh.vertices,
+        dtype=torch.float32,
+        device=device,
+    )
+    vertices = torch.stack(
+        [
+            vertices_y_up[:, 0],
+            -vertices_y_up[:, 2],
+            vertices_y_up[:, 1],
+        ],
+        dim=1,
+    )
+    faces = torch.as_tensor(
+        mesh.faces,
+        dtype=torch.long,
+        device=device,
+    )
+    samples = sample_mesh_farthest_points(
+        Meshes(vertices[None], faces[None]),
+        num_points=DETECTION_NUM_SAMPLES,
+    )
+    samples, phi, Gphi = build_intrinsic_basis(
+        verts=vertices,
+        faces=faces,
+        samples=samples,
+        intrinsic_dim=DETECTION_INTRINSIC_DIM,
+    )
+    return samples, phi, Gphi
 
 
 class DetectRotationSymmetry(Operation):
@@ -47,47 +84,17 @@ class DetectRotationSymmetry(Operation):
     def key_parts(self, inputs: OperationInputs, params: dict[str, Any]) -> dict[str, Any]:
         return {}
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any] | None,
     ) -> OperationResult:
-        mesh = trimesh.load_mesh(
-            inputs.paths[SHAPE_VISUALIZATION_MESH],
-            file_type="glb",
-        )
-
         device = torch.device(DEVICE)
-        vertices_y_up = torch.as_tensor(
-            mesh.vertices,
-            dtype=torch.float32,
-            device=device,
-        )
-        vertices = torch.stack(
-            [
-                vertices_y_up[:, 0],
-                -vertices_y_up[:, 2],
-                vertices_y_up[:, 1],
-            ],
-            dim=1,
-        )
-        faces = torch.as_tensor(
-            mesh.faces,
-            dtype=torch.long,
-            device=device,
-        )
-
-        samples = sample_mesh_farthest_points(
-            Meshes(vertices[None], faces[None]),
-            num_points=DETECTION_NUM_SAMPLES,
-        )
-        samples, phi, Gphi = build_intrinsic_basis(
-            verts=vertices,
-            faces=faces,
-            samples=samples,
-            intrinsic_dim=DETECTION_INTRINSIC_DIM,
+        samples, phi, Gphi = load_detection_basis(
+            inputs.paths[SHAPE_VISUALIZATION_MESH],
+            device,
         )
 
         candidates = detect_rotation_axes(
@@ -98,6 +105,9 @@ class DetectRotationSymmetry(Operation):
             num_icp_init=DETECTION_NUM_ICP_INIT,
             max_fold=DETECTION_MAX_FOLD,
         )
+
+        del samples, phi, Gphi
+        torch.cuda.empty_cache()
 
         return OperationResult(json_result=candidates)
 
@@ -123,47 +133,17 @@ class DetectReflectionPlanes(Operation):
     def key_parts(self, inputs: OperationInputs, params: dict[str, Any]) -> dict[str, Any]:
         return {}
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any] | None,
     ) -> OperationResult:
-        mesh = trimesh.load_mesh(
-            inputs.paths[SHAPE_VISUALIZATION_MESH],
-            file_type="glb",
-        )
-
         device = torch.device(DEVICE)
-        vertices_y_up = torch.as_tensor(
-            mesh.vertices,
-            dtype=torch.float32,
-            device=device,
-        )
-        vertices = torch.stack(
-            [
-                vertices_y_up[:, 0],
-                -vertices_y_up[:, 2],
-                vertices_y_up[:, 1],
-            ],
-            dim=1,
-        )
-        faces = torch.as_tensor(
-            mesh.faces,
-            dtype=torch.long,
-            device=device,
-        )
-
-        samples = sample_mesh_farthest_points(
-            Meshes(vertices[None], faces[None]),
-            num_points=DETECTION_NUM_SAMPLES,
-        )
-        samples, phi, Gphi = build_intrinsic_basis(
-            verts=vertices,
-            faces=faces,
-            samples=samples,
-            intrinsic_dim=DETECTION_INTRINSIC_DIM,
+        samples, phi, Gphi = load_detection_basis(
+            inputs.paths[SHAPE_VISUALIZATION_MESH],
+            device,
         )
 
         candidates = detect_reflection_planes(
@@ -173,6 +153,9 @@ class DetectReflectionPlanes(Operation):
             num_icp_iter=DETECTION_NUM_ICP_ITER,
             num_icp_init=DETECTION_NUM_ICP_INIT,
         )
+
+        del samples, phi, Gphi
+        torch.cuda.empty_cache()
 
         return OperationResult(json_result=candidates)
 
@@ -198,47 +181,17 @@ class DetectFinerSymmetry(Operation):
     def key_parts(self, inputs: OperationInputs, params: dict[str, Any]) -> dict[str, Any]:
         return {}
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any] | None,
     ) -> OperationResult:
-        mesh = trimesh.load_mesh(
-            inputs.paths[SHAPE_VISUALIZATION_MESH],
-            file_type="glb",
-        )
-
         device = torch.device(DEVICE)
-        vertices_y_up = torch.as_tensor(
-            mesh.vertices,
-            dtype=torch.float32,
-            device=device,
-        )
-        vertices = torch.stack(
-            [
-                vertices_y_up[:, 0],
-                -vertices_y_up[:, 2],
-                vertices_y_up[:, 1],
-            ],
-            dim=1,
-        )
-        faces = torch.as_tensor(
-            mesh.faces,
-            dtype=torch.long,
-            device=device,
-        )
-
-        samples = sample_mesh_farthest_points(
-            Meshes(vertices[None], faces[None]),
-            num_points=DETECTION_NUM_SAMPLES,
-        )
-        samples, phi, Gphi = build_intrinsic_basis(
-            verts=vertices,
-            faces=faces,
-            samples=samples,
-            intrinsic_dim=DETECTION_INTRINSIC_DIM,
+        samples, phi, Gphi = load_detection_basis(
+            inputs.paths[SHAPE_VISUALIZATION_MESH],
+            device,
         )
 
         major_axis = torch.tensor(
@@ -282,6 +235,9 @@ class DetectFinerSymmetry(Operation):
             max_fold=DETECTION_MAX_FOLD,
         )
 
+        del samples, phi, Gphi, major_axis, center
+        torch.cuda.empty_cache()
+
         return OperationResult(
             json_result={
                 "c2_axes_perpendicular_to_axis": c2_axes_perpendicular_to_axis,
@@ -303,12 +259,12 @@ class ConfirmSymmetry(Operation):
             "symmetry": params["symmetry"],
         }
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any] | None,
     ) -> OperationResult:
         return OperationResult(
             json_result=params["symmetry"],

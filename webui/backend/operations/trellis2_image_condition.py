@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -5,8 +6,8 @@ from PIL import Image
 
 from inference.trellis2 import preprocess_image
 
-from ..loaders.trellis2 import DEVICE, TRELLIS2Loader
-from . import Emit, Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
+from ..loaders.trellis2 import DEVICE, TRELLIS2Runtime
+from . import Operation, OperationContext, OperationInputs, OperationOutput, OperationResult
 
 IMAGE_PNG = "image_png"
 IMAGE_CONDITION_512 = "image_condition_512"
@@ -20,8 +21,8 @@ class Trellis2ImageCondition(Operation):
     creates_session = True
     output_roles = (IMAGE_PNG, IMAGE_CONDITION_512, IMAGE_CONDITION_1024)
 
-    def __init__(self, loader: TRELLIS2Loader):
-        self.loader = loader
+    def __init__(self, runtime: TRELLIS2Runtime):
+        self.runtime = runtime
 
     def resolve_inputs(self, coordinator: Any, request: Any) -> OperationInputs:
         if len(request.input_upload_keys) != 1:
@@ -42,12 +43,12 @@ class Trellis2ImageCondition(Operation):
             "upload_content_hash": inputs.records["upload"]["content_hash"],
         }
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any] | None,
     ) -> OperationResult:
         upload_record = inputs.records["upload"]
 
@@ -56,11 +57,12 @@ class Trellis2ImageCondition(Operation):
 
         source_png = source_image.convert("RGBA" if "A" in source_image.getbands() else "RGB")
 
-        rembg_model = self.loader.rembg_model
+        rembg_model = self.runtime.rembg_model
         rembg_model.to(DEVICE)
         processed_image_512 = preprocess_image(source_image.copy(), rembg_model=rembg_model, target_size=512)
         processed_image_1024 = preprocess_image(source_image.copy(), rembg_model=rembg_model, target_size=1024)
         rembg_model.cpu()
+        torch.cuda.empty_cache()
 
         image_path = context.work_dir / "image.png"
         cond_512_path = context.work_dir / "image_condition_512.pt"
@@ -68,7 +70,7 @@ class Trellis2ImageCondition(Operation):
 
         source_png.save(image_path)
 
-        image_cond_model = self.loader.image_cond_model
+        image_cond_model = self.runtime.image_cond_model
         image_cond_model.to(DEVICE)
 
         image_cond_model.image_size = 512
@@ -80,6 +82,7 @@ class Trellis2ImageCondition(Operation):
         torch.save(cond_1024, cond_1024_path)
 
         image_cond_model.cpu()
+        torch.cuda.empty_cache()
 
         return OperationResult(
             outputs=[

@@ -2,16 +2,18 @@ import type {
   ActionKey,
   ActionRecord,
   ActionResult,
+  ExecutionProgress,
   NodeRunKey,
   NodeRunResult,
   OutputRole,
   RequestId,
   RestoredSessionRef,
   SessionId,
+  SessionRevision,
   UploadKey,
 } from '../types';
 import type { ModelId, OperationId } from '../models/types';
-import { postJson, type ApiResult } from './client';
+import { submitApi, type ApiResult } from './client';
 import {
   actionOutputsWithUrls,
   nodeRunOutputsWithUrls,
@@ -26,13 +28,16 @@ export type SubmitNodeRunRequest = {
   params: Record<string, unknown>;
   requestId: RequestId;
   sessionId: SessionId | null;
+  sessionRevision: SessionRevision;
 };
 
 export type SubmitActionRequest = {
+  modelId: ModelId;
   operationId: OperationId;
   params: Record<string, unknown>;
   requestId: RequestId;
   sessionId: SessionId;
+  sessionRevision: SessionRevision;
   sourceNodeRunKey: NodeRunKey;
 };
 
@@ -43,7 +48,19 @@ type BackendExecutionResponse = {
   metadata: Record<string, unknown>;
   outputs: Record<OutputRole, BackendOutputRef>;
   session_id: string;
+  session_revision: number;
 };
+
+type BackendPrepareResponse =
+  | {
+      result: BackendExecutionResponse;
+      status: 'completed';
+    }
+  | {
+      session_id: string;
+      session_revision: number;
+      status: 'gpu_required';
+    };
 
 type BackendNodeRunRecord = {
   ancestor_run_keys: string[];
@@ -76,23 +93,64 @@ type BackendRestoreSessionResponse = {
   session: {
     active_run_keys: string[];
     model_id: string;
+    revision: number;
     session_id: string;
   };
 };
 
-export async function submitNodeRun(
-  request: SubmitNodeRunRequest,
-): Promise<ApiResult<NodeRunResult>> {
-  const result = await postJson<BackendExecutionResponse>('/node-runs', {
-    input_upload_keys: request.inputUploadKeys,
+async function submitExecution(
+  request: SubmitNodeRunRequest | SubmitActionRequest,
+  executionKind: 'node_run' | 'action',
+  onProgress?: (progress: ExecutionProgress) => void,
+): Promise<ApiResult<BackendExecutionResponse>> {
+  const nodeRunRequest = request as SubmitNodeRunRequest;
+  const actionRequest = request as SubmitActionRequest;
+  const payload = {
+    execution_kind: executionKind,
+    input_upload_keys: executionKind === 'node_run' ? nodeRunRequest.inputUploadKeys : [],
     model_id: request.modelId,
     operation_id: request.operationId,
-    parent_run_keys: request.parentRunKeys,
     params: request.params,
+    parent_run_keys: executionKind === 'node_run' ? nodeRunRequest.parentRunKeys : [],
     request_id: request.requestId,
     session_id: request.sessionId,
-  });
+    session_revision: request.sessionRevision,
+    source_node_run_key:
+      executionKind === 'action' ? actionRequest.sourceNodeRunKey : null,
+  };
 
+  const prepare = await submitApi<BackendPrepareResponse>('/prepare_execution', {
+    payload,
+  });
+  if (!prepare.ok) {
+    return prepare;
+  }
+
+  if (prepare.value.status === 'completed') {
+    return {
+      ok: true,
+      value: prepare.value.result,
+    };
+  }
+
+  const executePayload = {
+    ...payload,
+    session_id: prepare.value.session_id,
+    session_revision: prepare.value.session_revision,
+  };
+
+  return submitApi<BackendExecutionResponse>(
+    '/execute_execution',
+    { payload: executePayload },
+    onProgress,
+  );
+}
+
+export async function submitNodeRun(
+  request: SubmitNodeRunRequest,
+  onProgress?: (progress: ExecutionProgress) => void,
+): Promise<ApiResult<NodeRunResult>> {
+  const result = await submitExecution(request, 'node_run', onProgress);
   if (!result.ok) {
     return result;
   }
@@ -107,6 +165,7 @@ export async function submitNodeRun(
       metadata: result.value.metadata,
       outputs: nodeRunOutputsWithUrls(key, result.value.outputs),
       sessionId: result.value.session_id as SessionId,
+      sessionRevision: result.value.session_revision as SessionRevision,
     },
   };
 }
@@ -115,14 +174,15 @@ export async function restoreSession(
   sessionId: SessionId,
   key?: NodeRunKey,
 ): Promise<ApiResult<RestoredSessionRef>> {
-  const params = key ? `?${new URLSearchParams({ key }).toString()}` : '';
-  const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}${params}`);
-
-  if (!response.ok) {
-    return { message: `${response.status} ${response.statusText}`, ok: false };
+  const result = await submitApi<BackendRestoreSessionResponse>('/restore_session', {
+    key: key ?? null,
+    session_id: sessionId,
+  });
+  if (!result.ok) {
+    return result;
   }
 
-  const restored = (await response.json()) as BackendRestoreSessionResponse;
+  const restored = result.value;
   return {
     ok: true,
     value: {
@@ -163,21 +223,16 @@ export async function restoreSession(
         };
       }),
       sessionId: restored.session.session_id as SessionId,
+      sessionRevision: restored.session.revision as SessionRevision,
     },
   };
 }
 
 export async function submitAction<JsonResult = unknown>(
   request: SubmitActionRequest,
+  onProgress?: (progress: ExecutionProgress) => void,
 ): Promise<ApiResult<ActionResult<JsonResult>>> {
-  const result = await postJson<BackendExecutionResponse>('/actions', {
-    operation_id: request.operationId,
-    params: request.params,
-    request_id: request.requestId,
-    session_id: request.sessionId,
-    source_node_run_key: request.sourceNodeRunKey,
-  });
-
+  const result = await submitExecution(request, 'action', onProgress);
   if (!result.ok) {
     return result;
   }
@@ -192,6 +247,7 @@ export async function submitAction<JsonResult = unknown>(
       metadata: result.value.metadata,
       outputs: actionOutputsWithUrls(key, result.value.outputs),
       sessionId: result.value.session_id as SessionId,
+      sessionRevision: result.value.session_revision as SessionRevision,
     },
   };
 }

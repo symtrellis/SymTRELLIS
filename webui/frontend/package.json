@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@gradio/client": "2.3.1",
     "@radix-ui/react-slider": "^1.4.3",
     "@radix-ui/react-switch": "^1.3.2",
     "lucide-react": "^1.23.0",

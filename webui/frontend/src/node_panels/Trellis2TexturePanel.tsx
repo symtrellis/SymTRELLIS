@@ -59,7 +59,12 @@ export function Trellis2TexturePanel({
         params={state.params}
       />
 
-      <GenerationStatusBlock metadata={[]} progress={state.run.progress} status={state.run.status} />
+      <GenerationStatusBlock
+        metadata={[]}
+        progress={state.run.progress}
+        stage={state.run.stage}
+        status={state.run.status}
+      />
 
       <GenerationActions
         nextActions={nextActions}

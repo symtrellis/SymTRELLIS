@@ -74,6 +74,7 @@ export function Trellis2SymmetrySparseStructurePanel({
       <GenerationStatusBlock
         metadata={[{ label: 'voxel count', value: state.metadata.voxelCount }]}
         progress={state.run.progress}
+        stage={state.run.stage}
         status={state.run.status}
       />
 

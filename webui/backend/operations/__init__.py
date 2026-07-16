@@ -1,4 +1,4 @@
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,9 +34,6 @@ class OperationResult:
     json_result: Any = None
 
 
-Emit = Callable[[Any], Coroutine[Any, Any, None]]
-
-
 class Operation:
     operation_id: str
     operation_version = "1"
@@ -51,11 +48,22 @@ class Operation:
     def key_parts(self, inputs: OperationInputs, params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
-    async def run(
+    def run(
         self,
         inputs: OperationInputs,
         params: dict[str, Any],
         context: OperationContext,
-        emit: Emit,
+        progress: Callable[..., Any] | None,
     ) -> OperationResult:
         raise NotImplementedError
+
+
+def forward_glb_progress(
+    progress: Callable[..., Any],
+    offset: float,
+    scale: float,
+    update: dict[str, Any],
+) -> None:
+    total_progress = offset + scale * update["progress"]
+    stage = update["stage"]
+    progress(total_progress, desc=stage)

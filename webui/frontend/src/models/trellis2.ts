@@ -7,6 +7,21 @@ import type {
   SymmetryProjectionParams,
 } from '../state/generation';
 
+export const trellis2OperationIds = {
+  confirmDetectedSymmetry: 'symmetry.confirm_detected_tuple',
+  confirmManualSymmetry: 'symmetry.confirm_manual_tuple',
+  detectFinerSymmetry: 'symmetry.detect_finer_symmetry',
+  detectReflectionPlanes: 'symmetry.detect_reflection_planes',
+  detectRotationSymmetry: 'symmetry.detect_rotation_symmetry',
+  exportGlb: 'trellis2.export_glb',
+  imageCondition: 'trellis2.image_condition',
+  symmetryShape: 'trellis2.shape.symmetry',
+  symmetrySparseStructure: 'trellis2.sparse_structure.symmetry',
+  texture: 'trellis2.texture.generate',
+  vanillaShape: 'trellis2.shape.vanilla',
+  vanillaSparseStructure: 'trellis2.sparse_structure.vanilla',
+} as const;
+
 export type Trellis2ShapeMode = '512' | 'cascade';
 
 export type Trellis2ShapeParams = {
@@ -44,7 +59,11 @@ export type Trellis2ShapeMetadata = {
   voxelCount: number;
 };
 
-export type Trellis2TextureMetadata = Record<string, never>;
+export type Trellis2TextureMetadata = {
+  oVoxelGridSize: number;
+  shapeLatentGridSize: number;
+  textureVoxelCount: number;
+};
 
 export type Trellis2VanillaSparseStructureState = GenerationState<
   Trellis2VanillaSparseStructureParams,
@@ -175,7 +194,11 @@ export const trellis2InitialShapeMetadata: Trellis2ShapeMetadata = {
   voxelCount: 0,
 };
 
-export const trellis2InitialTextureMetadata: Trellis2TextureMetadata = {};
+export const trellis2InitialTextureMetadata: Trellis2TextureMetadata = {
+  oVoxelGridSize: 0,
+  shapeLatentGridSize: 0,
+  textureVoxelCount: 0,
+};
 
 export function estimateTrellis2Bf16FlowPeakGb(maxTokens: number): number {
   return 2.691 + 0.00004342 * maxTokens;
@@ -195,8 +218,14 @@ export function trellis2ShapeMetadata(metadata: Record<string, unknown>): Trelli
   };
 }
 
-export function trellis2TextureMetadata(): Trellis2TextureMetadata {
-  return {};
+export function trellis2TextureMetadata(
+  metadata: Record<string, unknown>,
+): Trellis2TextureMetadata {
+  return {
+    oVoxelGridSize: Number(metadata.oVoxelGridSize ?? 0),
+    shapeLatentGridSize: Number(metadata.shapeLatentGridSize ?? 0),
+    textureVoxelCount: Number(metadata.textureVoxelCount ?? 0),
+  };
 }
 
 export const trellis2ModelSpec: ModelSpec = {
@@ -210,56 +239,56 @@ export const trellis2ModelSpec: ModelSpec = {
         id: 'image_condition',
         kind: 'trellis2_image_condition',
         label: 'Image condition',
-        operation: 'trellis2.image_condition',
+        operation: trellis2OperationIds.imageCondition,
         shortLabel: 'IMG COND',
       },
       {
         id: 'vanilla_sparse_structure',
         kind: 'trellis2_vanilla_sparse_structure',
         label: 'Vanilla sparse structure generation',
-        operation: 'trellis2.sparse_structure.vanilla',
+        operation: trellis2OperationIds.vanillaSparseStructure,
         shortLabel: 'VANILLA SS',
       },
       {
         id: 'vanilla_shape',
         kind: 'trellis2_vanilla_shape',
         label: 'Generate shape with vanilla model',
-        operation: 'trellis2.shape.vanilla',
+        operation: trellis2OperationIds.vanillaShape,
         shortLabel: 'VANILLA SHAPE',
       },
       {
         id: 'detect_adjust_symmetry',
         kind: 'detect_adjust_symmetry',
         label: 'Detect and adjust symmetry',
-        operation: 'symmetry.confirm_detected_tuple',
+        operation: trellis2OperationIds.confirmDetectedSymmetry,
         shortLabel: 'DETECT SYM',
       },
       {
         id: 'manual_symmetry',
         kind: 'manual_symmetry',
         label: 'Manually specify symmetry',
-        operation: 'symmetry.confirm_manual_tuple',
+        operation: trellis2OperationIds.confirmManualSymmetry,
         shortLabel: 'MANUAL SYM',
       },
       {
         id: 'symmetry_sparse_structure',
         kind: 'trellis2_symmetry_sparse_structure',
         label: 'Symmetry enforced sparse structure generation',
-        operation: 'trellis2.sparse_structure.symmetry',
+        operation: trellis2OperationIds.symmetrySparseStructure,
         shortLabel: 'SYM SS',
       },
       {
         id: 'symmetry_shape',
         kind: 'trellis2_symmetry_shape',
         label: 'Symmetry enforced shape generation',
-        operation: 'trellis2.shape.symmetry',
+        operation: trellis2OperationIds.symmetryShape,
         shortLabel: 'SYM SHAPE',
       },
       {
         id: 'texture',
         kind: 'trellis2_texture',
         label: 'Generate texture',
-        operation: 'trellis2.texture.generate',
+        operation: trellis2OperationIds.texture,
         shortLabel: 'TEXTURE',
       },
     ],
