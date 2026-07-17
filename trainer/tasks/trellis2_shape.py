@@ -74,6 +74,7 @@ class Config(TrainConfig):
     decoded_output_weight: float = 0.0
     decoded_subdivision_weight: float = 0.0
     decoder_resolution: int = 512
+    max_decoded_output_points: int = 2_500_000
 
 
 class Task(BaseTask[Config]):
@@ -120,6 +121,21 @@ class Task(BaseTask[Config]):
             with autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=self.amp_enabled):
                 target_output, target_subdivisions = decode_shape_features(decoder, target_slat)
 
+        decoded_output_points = target_output.feats.shape[0]
+        decoded_output_points_metric = prediction.new_tensor(float(decoded_output_points))
+        # Keep latent-space supervision while skipping a guided lattice that exceeds the decoder memory budget.
+        if decoded_output_points > self.config.max_decoded_output_points:
+            decoder_loss = prediction.new_zeros(())
+            return decoder_loss, {
+                "loss_decoded_output_l2_weighted": prediction.new_zeros(()),
+                "loss_decoded_subdivision_l2_weighted": prediction.new_zeros(()),
+                "decoder_loss": decoder_loss,
+                "decoder_output_l2": prediction.new_zeros(()),
+                "decoder_subdivision_l2": prediction.new_zeros(()),
+                "decoder_supervision_keep_ratio": prediction.new_zeros(()),
+                "decoder_target_output_points": decoded_output_points_metric,
+            }
+
         with autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=self.amp_enabled):
             prediction_output, prediction_subdivisions = decode_shape_features(
                 decoder,
@@ -139,4 +155,6 @@ class Task(BaseTask[Config]):
             "decoder_loss": decoder_loss,
             "decoder_output_l2": decoded_output_l2,
             "decoder_subdivision_l2": decoded_subdivision_l2,
+            "decoder_supervision_keep_ratio": prediction.new_ones(()),
+            "decoder_target_output_points": decoded_output_points_metric,
         }
