@@ -3,7 +3,6 @@ import type { ThemeMode } from '../types';
 export type ViewerColors = {
   background: string;
   box: string;
-  mesh: string;
   symmetryAccent: string;
   symmetryCylinder: string;
   symmetryCylinderOpacity: number;
@@ -17,7 +16,6 @@ export function viewerColors(theme: ThemeMode): ViewerColors {
     return {
       background: '#141414',
       box: '#b8b8b4',
-      mesh: '#a49f99',
       symmetryAccent: '#f2f2ee',
       symmetryCylinder: '#7aa2ff',
       symmetryCylinderOpacity: 0.16,
@@ -30,7 +28,6 @@ export function viewerColors(theme: ThemeMode): ViewerColors {
   return {
     background: '#f5f5f3',
     box: '#202020',
-    mesh: '#c7beb3',
     symmetryAccent: '#1f1f1f',
     symmetryCylinder: '#8fb7ff',
     symmetryCylinderOpacity: 0.2,

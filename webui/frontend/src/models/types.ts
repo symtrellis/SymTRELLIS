@@ -18,6 +18,8 @@ export type NodeKind =
 
 export type OperationId = string;
 
+export type ViewerMaterial = 'neutral_shape' | 'neutral_voxel' | 'source';
+
 export type DagLane = 'left' | 'main';
 
 export type DagEdgeRoute = 'straight' | 'side_branch' | 'side_merge' | 'right_bypass';
@@ -49,7 +51,7 @@ export type ModelDagLayout = {
 };
 
 export type ViewerOutputCandidate = {
-  material: 'neutral' | 'source';
+  material: ViewerMaterial;
   nodeId: NodeInstanceId;
   roles: string[];
 };

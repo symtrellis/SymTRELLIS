@@ -36,7 +36,7 @@ from .storage import SessionExpiredError, Storage
 
 STORAGE_ROOT = Path(os.environ.get("SYMTRELLIS_WEBUI_STORAGE_ROOT", "/tmp/symtrellis_webui"))
 FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
-SESSION_TIMEOUT_SECONDS = int(os.environ.get("SYMTRELLIS_WEBUI_SESSION_TIMEOUT_SECONDS", "900"))
+SESSION_TIMEOUT_SECONDS = int(os.environ.get("SYMTRELLIS_WEBUI_SESSION_TIMEOUT_SECONDS", "3600"))
 CLEANUP_INTERVAL_SECONDS = int(os.environ.get("SYMTRELLIS_WEBUI_CLEANUP_INTERVAL_SECONDS", "30"))
 PREPARED_RESERVATION_SECONDS = 120
 RUNTIME_ID = uuid4().hex

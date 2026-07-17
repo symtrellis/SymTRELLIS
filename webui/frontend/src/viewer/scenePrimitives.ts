@@ -54,20 +54,25 @@ export function updateWorldAxesColors(axes: THREE.Object3D, colors: ViewerColors
   });
 }
 
-export function createViewerLights(theme: 'light' | 'dark') {
+export function createViewerLights() {
   const group = new THREE.Group();
-  const hemisphereLight = new THREE.HemisphereLight(
-    0xffffff,
-    theme === 'dark' ? 0x343438 : 0xd6d0c6,
-    theme === 'dark' ? 0.72 : 0.62,
-  );
-  const ambientLight = new THREE.AmbientLight(0xffffff, theme === 'dark' ? 0.25 : 0.3);
-  const keyLight = new THREE.DirectionalLight(0xffffff, theme === 'dark' ? 3.5 : 3);
-  const fillLight = new THREE.DirectionalLight(0xdde6ff, theme === 'dark' ? 0.85 : 0.58);
-  const rimLight = new THREE.DirectionalLight(0xffffff, theme === 'dark' ? 1.4 : 1.05);
+  const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x70747a, 0.12);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.05);
+  const keyLight = new THREE.DirectionalLight(0xffffff, 3);
+  const fillLight = new THREE.DirectionalLight(0xdde6ff, 0.55);
+  const rimLight = new THREE.DirectionalLight(0xffffff, 0.9);
 
   keyLight.position.set(2.5, -3.5, 4.5);
   keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(2048, 2048);
+  keyLight.shadow.camera.left = -0.65;
+  keyLight.shadow.camera.right = 0.65;
+  keyLight.shadow.camera.top = 0.65;
+  keyLight.shadow.camera.bottom = -0.65;
+  keyLight.shadow.camera.near = 0.1;
+  keyLight.shadow.camera.far = 10;
+  keyLight.shadow.camera.updateProjectionMatrix();
+  keyLight.shadow.normalBias = 0.003;
   fillLight.position.set(-3, 2.5, 2);
   rimLight.position.set(-2, 3.8, 3.2);
   group.add(hemisphereLight, ambientLight, keyLight, fillLight, rimLight);

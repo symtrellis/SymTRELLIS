@@ -362,7 +362,7 @@ export const trellis2ModelSpec: ModelSpec = {
     detect_adjust_symmetry: {
       outputCandidates: [
         {
-          material: 'neutral',
+          material: 'neutral_shape',
           nodeId: 'vanilla_shape',
           roles: trellis2OutputRoleCandidates.shapeMesh,
         },
@@ -374,12 +374,12 @@ export const trellis2ModelSpec: ModelSpec = {
     symmetry_shape: {
       outputCandidates: [
         {
-          material: 'neutral',
+          material: 'neutral_shape',
           nodeId: 'symmetry_shape',
           roles: trellis2OutputRoleCandidates.shapeMesh,
         },
         {
-          material: 'neutral',
+          material: 'neutral_voxel',
           nodeId: 'symmetry_sparse_structure',
           roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
@@ -388,12 +388,12 @@ export const trellis2ModelSpec: ModelSpec = {
     symmetry_sparse_structure: {
       outputCandidates: [
         {
-          material: 'neutral',
+          material: 'neutral_voxel',
           nodeId: 'symmetry_sparse_structure',
           roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
         {
-          material: 'neutral',
+          material: 'neutral_shape',
           nodeId: 'vanilla_shape',
           roles: trellis2OutputRoleCandidates.shapeMesh,
         },
@@ -408,12 +408,12 @@ export const trellis2ModelSpec: ModelSpec = {
           roles: trellis2OutputRoleCandidates.texturedMesh,
         },
         {
-          material: 'neutral',
+          material: 'neutral_shape',
           nodeId: 'symmetry_shape',
           roles: trellis2OutputRoleCandidates.shapeMesh,
         },
         {
-          material: 'neutral',
+          material: 'neutral_shape',
           nodeId: 'vanilla_shape',
           roles: trellis2OutputRoleCandidates.shapeMesh,
         },
@@ -422,12 +422,12 @@ export const trellis2ModelSpec: ModelSpec = {
     vanilla_shape: {
       outputCandidates: [
         {
-          material: 'neutral',
+          material: 'neutral_shape',
           nodeId: 'vanilla_shape',
           roles: trellis2OutputRoleCandidates.shapeMesh,
         },
         {
-          material: 'neutral',
+          material: 'neutral_voxel',
           nodeId: 'vanilla_sparse_structure',
           roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },
@@ -436,7 +436,7 @@ export const trellis2ModelSpec: ModelSpec = {
     vanilla_sparse_structure: {
       outputCandidates: [
         {
-          material: 'neutral',
+          material: 'neutral_voxel',
           nodeId: 'vanilla_sparse_structure',
           roles: trellis2OutputRoleCandidates.sparseStructureMesh,
         },

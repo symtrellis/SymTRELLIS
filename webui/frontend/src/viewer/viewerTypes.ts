@@ -1,7 +1,8 @@
 import type { SymmetryOverlay, SymmetryTuple } from '../types';
+import type { ViewerMaterial } from '../models/types';
 
 export type ViewerGlbContent = {
-  material: 'neutral' | 'source';
+  material: ViewerMaterial;
   url: string;
 };
 

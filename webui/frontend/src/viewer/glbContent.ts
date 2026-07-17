@@ -1,17 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { ViewerMaterial } from '../models/types';
 import type { ViewerGlbContent } from './viewerTypes';
-import type { ViewerColors } from './viewerTheme';
 import { disposeObject } from './scenePrimitives';
 
-type MaterialWithMap = THREE.Material & {
-  map?: THREE.Texture | null;
-};
-
 export type GlbContentManager = {
-  applyTheme: (colors: ViewerColors) => void;
   dispose: () => void;
-  setContent: (content: ViewerGlbContent | null, colors: ViewerColors) => void;
+  setContent: (content: ViewerGlbContent | null) => void;
 };
 
 export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
@@ -38,17 +33,12 @@ export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
   };
 
   return {
-    applyTheme(colors) {
-      if (activeContent?.material === 'neutral' && model) {
-        applyViewerMaterial(model, colors.mesh);
-      }
-    },
     dispose() {
       mounted = false;
       version += 1;
       clearModel();
     },
-    setContent(content, colors) {
+    setContent(content) {
       if (
         activeContent?.url === content?.url &&
         activeContent?.material === content?.material
@@ -75,8 +65,8 @@ export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
         model = gltf.scene;
         model.applyMatrix4(gltfYUpToViewerZUp);
         normalizeObjectToCanonicalBox(model);
-        if (content.material === 'neutral') {
-          applyViewerMaterial(model, colors.mesh);
+        if (content.material !== 'source') {
+          applyViewerMaterial(model, content.material);
         }
         scene.add(model);
       });
@@ -99,20 +89,23 @@ function normalizeObjectToCanonicalBox(object: THREE.Object3D, targetSize = 0.88
   }
 }
 
-function applyViewerMaterial(object: THREE.Object3D, color: string) {
+function applyViewerMaterial(
+  object: THREE.Object3D,
+  materialProfile: Exclude<ViewerMaterial, 'source'>,
+) {
   object.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       const oldMaterial = child.material;
-      const map = Array.isArray(oldMaterial)
-        ? (oldMaterial[0] as MaterialWithMap | undefined)?.map
-        : (oldMaterial as MaterialWithMap).map;
 
-      child.material = new THREE.MeshStandardMaterial({
-        color,
-        map: map ?? null,
-        metalness: 0.04,
-        roughness: 0.62,
+      child.material = new THREE.MeshPhysicalMaterial({
+        color: 0xc4beb5,
+        flatShading: materialProfile === 'neutral_voxel',
+        metalness: 0,
+        roughness: materialProfile === 'neutral_voxel' ? 0.68 : 0.5,
+        specularIntensity: materialProfile === 'neutral_voxel' ? 0.45 : 0.5,
       });
+      child.castShadow = true;
+      child.receiveShadow = true;
       if (Array.isArray(oldMaterial)) {
         oldMaterial.forEach((material) => material.dispose());
       } else {

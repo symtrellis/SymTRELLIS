@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { ThemeMode } from '../types';
 import type { ViewerContent } from './viewerTypes';
@@ -105,10 +110,35 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
     renderer.setSize(host.clientWidth, host.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = activeTheme === 'dark' ? 1.08 : 1;
+    renderer.toneMappingExposure = 1;
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.className = 'three-canvas';
     host.appendChild(renderer.domElement);
+
+    const roomEnvironment = new RoomEnvironment();
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const environmentRenderTarget = pmremGenerator.fromScene(roomEnvironment);
+    roomEnvironment.dispose();
+    pmremGenerator.dispose();
+    scene.environment = environmentRenderTarget.texture;
+    scene.environmentIntensity = 0.7;
+    scene.environmentRotation.x = Math.PI / 2;
+
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    const gtaoPass = new GTAOPass(scene, camera, host.clientWidth, host.clientHeight);
+    gtaoPass.blendIntensity = 0.55;
+    gtaoPass.updateGtaoMaterial({
+      distanceFallOff: 1,
+      radius: 0.08,
+      samples: 8,
+      thickness: 0.12,
+    });
+    const outputPass = new OutputPass();
+    composer.addPass(renderPass);
+    composer.addPass(gtaoPass);
+    composer.addPass(outputPass);
 
     const labelRenderer = new CSS2DRenderer();
     labelRenderer.setSize(host.clientWidth, host.clientHeight);
@@ -126,13 +156,13 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       camera.position.copy(controls.target).add(offset);
     };
 
-    let lights = createViewerLights(activeTheme);
+    const lights = createViewerLights();
     let canonicalBox = createCanonicalBox(colors.box);
     const worldAxes = createWorldAxes(colors);
     scene.add(lights, canonicalBox, worldAxes);
     let activeContent = initialContentRef.current;
     const glbContent = createGlbContentManager(scene);
-    glbContent.setContent(activeContent.glb, colors);
+    glbContent.setContent(activeContent.glb);
     let overlayRender = createSymmetryOverlayGroup(
       activeContent.overlays,
       activeContent.selectedOverlayId,
@@ -173,20 +203,17 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       activeTheme = nextTheme;
       colors = viewerColors(activeTheme);
       scene.background = new THREE.Color(colors.background);
-      renderer.toneMappingExposure = activeTheme === 'dark' ? 1.08 : 1;
 
-      scene.remove(lights, canonicalBox);
+      scene.remove(canonicalBox);
       disposeObject(canonicalBox);
-      lights = createViewerLights(activeTheme);
       canonicalBox = createCanonicalBox(colors.box);
-      scene.add(lights, canonicalBox);
+      scene.add(canonicalBox);
 
       updateWorldAxesColors(worldAxes, colors);
 
       disposeObject(viewGizmo.scene);
       viewGizmo = createViewGizmo(colors);
       gizmoMeshes = viewGizmo.pickables.map((pickable) => pickable.object);
-      glbContent.applyTheme(colors);
 
       scene.remove(overlayRender.group, symmetryPreview);
       disposeObject(overlayRender.group);
@@ -203,7 +230,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
 
     const applyContent = (nextContent: ViewerContent) => {
       activeContent = nextContent;
-      glbContent.setContent(activeContent.glb, colors);
+      glbContent.setContent(activeContent.glb);
       scene.remove(overlayRender.group, symmetryPreview);
       disposeObject(overlayRender.group);
       disposeObject(symmetryPreview);
@@ -296,6 +323,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
 
       controls.update();
       renderer.setSize(width, height);
+      composer.setSize(width, height);
       labelRenderer.setSize(width, height);
       previousCompact = compact;
     };
@@ -564,7 +592,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
 
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, host.clientWidth, host.clientHeight);
-      renderer.render(scene, camera);
+      composer.render();
       renderViewGizmo();
       labelRenderer.render(scene, camera);
     };
@@ -580,6 +608,10 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       controls.removeEventListener('start', markCustomView);
       controls.dispose();
       glbContent.dispose();
+      environmentRenderTarget.dispose();
+      gtaoPass.dispose();
+      outputPass.dispose();
+      composer.dispose();
       disposeObject(scene);
       disposeObject(viewGizmo.scene);
       renderer.dispose();
