@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { ThemeMode } from '../types';
 import type { ViewerContent } from './viewerTypes';
@@ -104,9 +105,10 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
     let compactViewport = isCompactViewport();
     let previousCompact = compactViewport;
     setDefaultCameraPosition(compactViewport);
+    const viewerPixelRatio = () => Math.min(window.devicePixelRatio || 1, 3);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(viewerPixelRatio());
     renderer.setSize(host.clientWidth, host.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -135,9 +137,11 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       samples: 8,
       thickness: 0.12,
     });
+    const smaaPass = new SMAAPass();
     const outputPass = new OutputPass();
     composer.addPass(renderPass);
     composer.addPass(gtaoPass);
+    composer.addPass(smaaPass);
     composer.addPass(outputPass);
 
     const labelRenderer = new CSS2DRenderer();
@@ -161,8 +165,6 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
     const worldAxes = createWorldAxes(colors);
     scene.add(lights, canonicalBox, worldAxes);
     let activeContent = initialContentRef.current;
-    const glbContent = createGlbContentManager(scene);
-    glbContent.setContent(activeContent.glb);
     let overlayRender = createSymmetryOverlayGroup(
       activeContent.overlays,
       activeContent.selectedOverlayId,
@@ -185,7 +187,6 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
     const markCustomView = () => {
       usingDefaultView = false;
     };
-    controls.addEventListener('start', markCustomView);
     let overlayPointerDown: { x: number; y: number } | null = null;
 
     let gizmoRect = {
@@ -226,6 +227,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       overlayPickables = overlayRender.pickables;
       symmetryPreview = createSymmetryPreviewGroup(activeContent.symmetryPreview, colors);
       scene.add(overlayRender.group, symmetryPreview);
+      requestRender();
     };
 
     const applyContent = (nextContent: ViewerContent) => {
@@ -242,6 +244,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       overlayPickables = overlayRender.pickables;
       symmetryPreview = createSymmetryPreviewGroup(activeContent.symmetryPreview, colors);
       scene.add(overlayRender.group, symmetryPreview);
+      requestRender();
     };
 
     const applyViewInsets = (insets: ViewInsets) => {
@@ -322,10 +325,14 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       };
 
       controls.update();
+      const pixelRatio = viewerPixelRatio();
+      renderer.setPixelRatio(pixelRatio);
+      composer.setPixelRatio(pixelRatio);
       renderer.setSize(width, height);
       composer.setSize(width, height);
       labelRenderer.setSize(width, height);
       previousCompact = compact;
+      requestRender();
     };
 
     const updateViewInsetAnimation = (time: number) => {
@@ -393,6 +400,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
         targetQuaternion,
       };
       controls.enabled = false;
+      requestRender();
     };
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -468,6 +476,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       camera.position.copy(controls.target).add(direction.multiplyScalar(lockedTopDrag.distance));
       camera.up.copy(worldUp);
       camera.lookAt(controls.target);
+      requestRender();
     };
 
     const handlePointerUp = (event: PointerEvent) => {
@@ -481,6 +490,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
           lockedTopView = false;
           controls.enabled = true;
           controls.update();
+          requestRender();
         }
         return;
       }
@@ -508,6 +518,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       const overlayId = hit?.object.userData.overlayId as string | undefined;
       if (overlayId) {
         onOverlayPickedRef.current?.(overlayId);
+        requestRender();
       }
     };
 
@@ -574,38 +585,88 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
       renderer.autoClear = autoClear;
     };
 
+    let frameId = 0;
+    function requestRender() {
+      if (document.visibilityState !== 'visible' || frameId !== 0) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(render);
+    }
+
+    function render(time: number) {
+      frameId = 0;
+      updateViewInsetAnimation(time);
+      const cameraAnimating = updateCameraAnimation(time);
+      const controlsChanged =
+        !cameraAnimating && !lockedTopView && !lockedTopDrag ? controls.update() : false;
+
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
+      composer.render();
+      renderViewGizmo();
+      labelRenderer.render(scene, camera);
+
+      if (cameraAnimation || viewInsetAnimation || lockedTopDrag || controlsChanged) {
+        requestRender();
+      }
+    }
+
+    const handleControlStart = () => {
+      markCustomView();
+      requestRender();
+    };
+
+    const handleControlChange = () => {
+      requestRender();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestRender();
+      } else if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+    };
+
+    const glbContent = createGlbContentManager(scene, requestRender);
+    glbContent.setContent(activeContent.glb);
+
     updateViewport();
     window.addEventListener('resize', handleResize);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    controls.addEventListener('start', handleControlStart);
+    controls.addEventListener('change', handleControlChange);
     renderer.domElement.addEventListener('pointerdown', handlePointerDown, true);
     renderer.domElement.addEventListener('pointermove', handlePointerMove, true);
     renderer.domElement.addEventListener('pointerup', handlePointerUp);
 
-    let frameId = 0;
-    const render = (time: number) => {
-      frameId = window.requestAnimationFrame(render);
-      updateViewInsetAnimation(time);
-      if (!updateCameraAnimation(time)) {
-        if (!lockedTopView && !lockedTopDrag) {
-          controls.update();
-        }
-      }
-
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, host.clientWidth, host.clientHeight);
-      composer.render();
-      renderViewGizmo();
-      labelRenderer.render(scene, camera);
-    };
-    frameId = window.requestAnimationFrame(render);
+    const layoutResizeObserver =
+      'ResizeObserver' in window
+        ? new ResizeObserver(() => updateViewport(true))
+        : null;
+    layoutResizeObserver?.observe(host);
+    const panelAnchor = document.querySelector<HTMLElement>('.node-panel-anchor');
+    const dagAnchor = document.querySelector<HTMLElement>('.dag-anchor');
+    if (panelAnchor) {
+      layoutResizeObserver?.observe(panelAnchor);
+    }
+    if (dagAnchor) {
+      layoutResizeObserver?.observe(dagAnchor);
+    }
 
     return () => {
       runtimeRef.current = null;
       window.cancelAnimationFrame(frameId);
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown, true);
       renderer.domElement.removeEventListener('pointermove', handlePointerMove, true);
       renderer.domElement.removeEventListener('pointerup', handlePointerUp);
-      controls.removeEventListener('start', markCustomView);
+      controls.removeEventListener('start', handleControlStart);
+      controls.removeEventListener('change', handleControlChange);
+      layoutResizeObserver?.disconnect();
       controls.dispose();
       glbContent.dispose();
       environmentRenderTarget.dispose();

@@ -9,7 +9,10 @@ export type GlbContentManager = {
   setContent: (content: ViewerGlbContent | null) => void;
 };
 
-export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
+export function createGlbContentManager(
+  scene: THREE.Scene,
+  requestRender: () => void,
+): GlbContentManager {
   const loader = new GLTFLoader();
   const gltfYUpToViewerZUp = new THREE.Matrix4().set(
     1, 0, 0, 0,
@@ -49,6 +52,7 @@ export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
       activeContent = content;
       version += 1;
       clearModel();
+      requestRender();
 
       if (!content) {
         return;
@@ -69,6 +73,7 @@ export function createGlbContentManager(scene: THREE.Scene): GlbContentManager {
           applyViewerMaterial(model, content.material);
         }
         scene.add(model);
+        requestRender();
       });
     },
   };

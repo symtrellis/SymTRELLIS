@@ -108,9 +108,9 @@ class Task(BaseTask[Config]):
         prediction: torch.Tensor,
         target: torch.Tensor,
         mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         if self.config.decoded_output_weight == 0.0 and self.config.decoded_subdivision_weight == 0.0:
-            return prediction.new_zeros(()), {}
+            return prediction.new_zeros(()), {}, {}
 
         decoder = cast("FlexiDualGridVaeDecoder", self.decoder)
         decoder_dtype = next(decoder.parameters()).dtype
@@ -123,10 +123,14 @@ class Task(BaseTask[Config]):
 
         decoded_output_points = target_output.feats.shape[0]
         decoded_output_points_metric = prediction.new_tensor(float(decoded_output_points))
+        eval_iou_metrics: dict[str, torch.Tensor] = {}
+        if not torch.is_grad_enabled():
+            eval_iou_metrics = {f"decoder_subdivision_iou_stage_{stage_index}": prediction.new_zeros(()) for stage_index in range(len(target_subdivisions))}
+
         # Keep latent-space supervision while skipping a guided lattice that exceeds the decoder memory budget.
         if decoded_output_points > self.config.max_decoded_output_points:
             decoder_loss = prediction.new_zeros(())
-            return decoder_loss, {
+            metrics = {
                 "loss_decoded_output_l2_weighted": prediction.new_zeros(()),
                 "loss_decoded_subdivision_l2_weighted": prediction.new_zeros(()),
                 "decoder_loss": decoder_loss,
@@ -134,7 +138,16 @@ class Task(BaseTask[Config]):
                 "decoder_subdivision_l2": prediction.new_zeros(()),
                 "decoder_supervision_keep_ratio": prediction.new_zeros(()),
                 "decoder_target_output_points": decoded_output_points_metric,
+                **eval_iou_metrics,
             }
+            invalid_metric = prediction.new_zeros(())
+            metric_validity = {
+                "decoder_output_l2": invalid_metric,
+                "decoder_subdivision_l2": invalid_metric,
+            }
+            for name in eval_iou_metrics:
+                metric_validity[name] = invalid_metric
+            return decoder_loss, metrics, metric_validity
 
         with autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=self.amp_enabled):
             prediction_output, prediction_subdivisions = decode_shape_features(
@@ -144,17 +157,39 @@ class Task(BaseTask[Config]):
             )
 
         decoded_output_l2 = F.mse_loss(prediction_output.feats.float(), target_output.feats.float())
-        decoded_subdivision_l2 = torch.stack([F.mse_loss(prediction_subdivision.feats.float(), target_subdivision.feats.float()) for prediction_subdivision, target_subdivision in zip(prediction_subdivisions, target_subdivisions)]).mean()
+        decoded_subdivision_l2 = torch.stack(
+            [
+                F.mse_loss(prediction_subdivision.feats.float(), target_subdivision.feats.float())
+                for prediction_subdivision, target_subdivision in zip(
+                    prediction_subdivisions,
+                    target_subdivisions,
+                )
+            ]
+        ).mean()
+
+        if not torch.is_grad_enabled():
+            # Stages after stage 0 are conditional metrics because earlier target subdivisions guide their lattices.
+            for stage_index, (prediction_subdivision, target_subdivision) in enumerate(zip(prediction_subdivisions, target_subdivisions)):
+                prediction_occupied = prediction_subdivision.feats > 0
+                target_occupied = target_subdivision.feats > 0
+                intersection = (prediction_occupied & target_occupied).sum().float()
+                union = (prediction_occupied | target_occupied).sum().float()
+                eval_iou_metrics[f"decoder_subdivision_iou_stage_{stage_index}"] = intersection / union.clamp_min(1.0)
 
         output_loss = self.config.decoded_output_weight * decoded_output_l2
         subdivision_loss = self.config.decoded_subdivision_weight * decoded_subdivision_l2
         decoder_loss = output_loss + subdivision_loss
-        return decoder_loss, {
-            "loss_decoded_output_l2_weighted": output_loss,
-            "loss_decoded_subdivision_l2_weighted": subdivision_loss,
-            "decoder_loss": decoder_loss,
-            "decoder_output_l2": decoded_output_l2,
-            "decoder_subdivision_l2": decoded_subdivision_l2,
-            "decoder_supervision_keep_ratio": prediction.new_ones(()),
-            "decoder_target_output_points": decoded_output_points_metric,
-        }
+        return (
+            decoder_loss,
+            {
+                "loss_decoded_output_l2_weighted": output_loss,
+                "loss_decoded_subdivision_l2_weighted": subdivision_loss,
+                "decoder_loss": decoder_loss,
+                "decoder_output_l2": decoded_output_l2,
+                "decoder_subdivision_l2": decoded_subdivision_l2,
+                "decoder_supervision_keep_ratio": prediction.new_ones(()),
+                "decoder_target_output_points": decoded_output_points_metric,
+                **eval_iou_metrics,
+            },
+            {},
+        )

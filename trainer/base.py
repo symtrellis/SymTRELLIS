@@ -52,8 +52,8 @@ class BaseTask(Generic[ConfigT]):
         prediction: torch.Tensor,
         target: torch.Tensor,
         mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        return prediction.new_zeros(()), {}
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        return prediction.new_zeros(()), {}, {}
 
     def state_dict(self) -> dict[str, Any]:
         return {}
@@ -216,8 +216,8 @@ class Trainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         micro_step = 0
-        accumulated_metrics: dict[str, torch.Tensor] | None = None
-        accumulated_count = 0
+        accumulated_metric_sums: dict[str, torch.Tensor] = {}
+        accumulated_metric_counts: dict[str, torch.Tensor] = {}
 
         for batch in prefetcher:
             if micro_step >= micro_batches_per_epoch:
@@ -226,18 +226,20 @@ class Trainer:
             should_sync = ((micro_step + 1) % self.config.accumulation_steps) == 0
             sync_context = nullcontext() if should_sync else self.ddp_model.no_sync()
             with sync_context:
-                total_loss, metrics = self.compute_batch(batch)
+                total_loss, metrics, metric_validity = self.compute_batch(batch)
                 loss = total_loss / self.config.accumulation_steps
                 self.scaler.scale(loss).backward()
 
             # Log metrics at the same cadence as optimizer updates: average within
-            # the local accumulation window first, then reduce across DDP ranks.
-            if accumulated_metrics is None:
-                accumulated_metrics = {name: value.detach().float() for name, value in metrics.items()}
-            else:
-                for name, value in metrics.items():
-                    accumulated_metrics[name] += value.detach().float()
-            accumulated_count += 1
+            # the local valid accumulation window first, then reduce across DDP ranks.
+            for name, value in metrics.items():
+                validity = metric_validity[name].detach().float()
+                if name in accumulated_metric_sums:
+                    accumulated_metric_sums[name] += value.detach().float() * validity
+                    accumulated_metric_counts[name] += validity
+                else:
+                    accumulated_metric_sums[name] = value.detach().float() * validity
+                    accumulated_metric_counts[name] = validity
 
             self.global_step += 1
             micro_step += 1
@@ -253,9 +255,9 @@ class Trainer:
             self.scheduler.step()
             self.update_step += 1
 
-            metrics_log = self.reduce_metrics(accumulated_metrics, accumulated_count)
-            accumulated_metrics = None
-            accumulated_count = 0
+            metrics_log = self.reduce_metrics(accumulated_metric_sums, accumulated_metric_counts)
+            accumulated_metric_sums = {}
+            accumulated_metric_counts = {}
 
             if self.rank == 0 and self.update_step % self.config.log_interval == 0:
                 metric_text = " ".join(f"{name} {value:.6f}" for name, value in metrics_log.items())
@@ -274,7 +276,10 @@ class Trainer:
 
         self.save_checkpoint(epoch)
 
-    def compute_batch(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    def compute_batch(
+        self,
+        batch: dict[str, torch.Tensor],
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         with autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=self.config.amp):
             # Batch contract: pair features plus a destination-to-source transform
             # produce a coefficient operator, which predicts destination features.
@@ -332,7 +337,12 @@ class Trainer:
         target = batch["feats_dst"]
         mask = self.task.feature_mask(batch, prediction, target)
         feature_metrics = compute_feature_metrics(prediction, target, mask)
-        extra_loss, extra_metrics = self.task.extra_loss_and_metrics(batch, prediction, target, mask)
+        extra_loss, extra_metrics, extra_metric_validity = self.task.extra_loss_and_metrics(
+            batch,
+            prediction,
+            target,
+            mask,
+        )
         total_loss = feature_metrics["feature_l2"] + extra_loss
 
         metrics = {
@@ -341,24 +351,31 @@ class Trainer:
             **feature_metrics,
             **extra_metrics,
         }
-        return total_loss, metrics
+        metric_validity = {name: value.new_ones((), dtype=torch.float32) for name, value in metrics.items()}
+        metric_validity.update(extra_metric_validity)
+        return total_loss, metrics, metric_validity
 
     def evaluate_split(self, loader: torch.utils.data.DataLoader, split_name: str) -> dict[str, float]:
         self.ddp_model.eval()
-        metric_sums: dict[str, float] = {}
-        metric_count = 0
+        metric_sums: dict[str, torch.Tensor] = {}
+        metric_counts: dict[str, torch.Tensor] = {}
         prefetcher = Prefetcher(loader, self.device)
 
         with torch.no_grad():
             for batch in prefetcher:
-                _, metrics = self.compute_batch(batch)
+                _, metrics, metric_validity = self.compute_batch(batch)
                 for name, value in metrics.items():
-                    metric_sums[name] = metric_sums.get(name, 0.0) + value.item()
-                metric_count += 1
+                    validity = metric_validity[name].detach().float()
+                    if name in metric_sums:
+                        metric_sums[name] += value.detach().float() * validity
+                        metric_counts[name] += validity
+                    else:
+                        metric_sums[name] = value.detach().float() * validity
+                        metric_counts[name] = validity
         prefetcher.close()
 
-        # Eval metrics are averaged over all rank-local batches, then reduced across ranks.
-        metrics_log = self.reduce_metrics(metric_sums, metric_count)
+        # Each metric carries its own valid-batch count before reduction across ranks.
+        metrics_log = self.reduce_metrics(metric_sums, metric_counts)
         if self.rank == 0:
             metric_text = " ".join(f"{name} {value:.6f}" for name, value in metrics_log.items())
             print(f"[{split_name}] {metric_text}")
@@ -367,16 +384,24 @@ class Trainer:
                     self.writer.add_scalar(f"{split_name}/{name}", value, self.update_step)
         return metrics_log
 
-    def reduce_metrics(self, metric_sums: dict[str, Any], metric_count: int) -> dict[str, float]:
+    def reduce_metrics(
+        self,
+        metric_sums: dict[str, torch.Tensor],
+        metric_counts: dict[str, torch.Tensor],
+    ) -> dict[str, float]:
         metric_names = list(metric_sums.keys())
-        stats = torch.tensor(
-            [float(metric_sums[name]) for name in metric_names] + [float(metric_count)],
+        stats = torch.cat(
+            [
+                torch.stack([metric_sums[name] for name in metric_names]),
+                torch.stack([metric_counts[name] for name in metric_names]),
+            ]
+        ).to(
             device=self.device,
             dtype=torch.float64,
         )
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
-        denominator = stats[-1].clamp_min(1.0)
-        return {name: (stats[i] / denominator).item() for i, name in enumerate(metric_names)}
+        num_metrics = len(metric_names)
+        return {name: (stats[i] / stats[num_metrics + i].clamp_min(1.0)).item() for i, name in enumerate(metric_names)}
 
     def save_checkpoint(self, epoch: int) -> None:
         if self.rank != 0 or not self.config.checkpoint_dir:

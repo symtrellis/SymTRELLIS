@@ -212,8 +212,30 @@ button {
 .node-panel-body,
 .pre-dag-panel-body {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 14px 16px 16px;
+}
+
+.node-panel *,
+.pre-dag-panel * {
+  min-width: 0;
+}
+
+.node-panel,
+.pre-dag-panel {
+  overflow-wrap: anywhere;
+}
+
+.node-panel button,
+.pre-dag-panel button,
+.node-panel input,
+.pre-dag-panel input,
+.node-panel select,
+.pre-dag-panel select,
+.node-panel textarea,
+.pre-dag-panel textarea {
+  max-width: 100%;
 }
 
 .pre-dag-panel-body {

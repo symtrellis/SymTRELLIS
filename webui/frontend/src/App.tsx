@@ -242,6 +242,22 @@ export default function App() {
     vanillaSparseStructure: dispatchTrellis2VanillaSparseStructure,
   };
 
+  useEffect(() => {
+    const preventGestureZoom: EventListener = (event) => {
+      event.preventDefault();
+    };
+
+    document.addEventListener('gesturestart', preventGestureZoom, { passive: false });
+    document.addEventListener('gesturechange', preventGestureZoom, { passive: false });
+    document.addEventListener('gestureend', preventGestureZoom, { passive: false });
+
+    return () => {
+      document.removeEventListener('gesturestart', preventGestureZoom);
+      document.removeEventListener('gesturechange', preventGestureZoom);
+      document.removeEventListener('gestureend', preventGestureZoom);
+    };
+  }, []);
+
   const selectedModel = modelSpecs[workflow.selectedModelId];
   const currentNode = selectedModel.dag.nodes.find((node) => node.id === workflow.currentNodeId);
   const successorRoutes = useMemo(

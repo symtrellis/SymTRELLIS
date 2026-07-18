@@ -63,9 +63,9 @@ class Task(BaseTask[Config]):
         prediction: torch.Tensor,
         target: torch.Tensor,
         mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         if self.config.decoded_loss_weight == 0.0:
-            return prediction.new_zeros(()), {}
+            return prediction.new_zeros(()), {}, {}
 
         decoder = self.decoder
         assert decoder is not None
@@ -115,13 +115,17 @@ class Task(BaseTask[Config]):
         decoder_iou = (intersection / union.clamp_min(1.0)).mean()
 
         extra_loss = self.config.decoded_loss_weight * decoded_l2
-        return extra_loss, {
-            "loss_decoded_l2_weighted": extra_loss,
-            "decoder_l2": decoded_l2,
-            "decoder_soft_bce": decoder_soft_bce,
-            "decoder_hard_bce": decoder_hard_bce,
-            "decoder_iou": decoder_iou,
-        }
+        return (
+            extra_loss,
+            {
+                "loss_decoded_l2_weighted": extra_loss,
+                "decoder_l2": decoded_l2,
+                "decoder_soft_bce": decoder_soft_bce,
+                "decoder_hard_bce": decoder_hard_bce,
+                "decoder_iou": decoder_iou,
+            },
+            {},
+        )
 
 
 def scatter_sparse_features(
