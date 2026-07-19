@@ -2,6 +2,8 @@
 
 Official code repository for **SymTRELLIS: Symmetry-Enforced Voxel Latents for 3D Generation**.
 
+[Guangda Ji](https://quantaji.github.io/), [Qimin Chen](https://qiminchen.github.io/), [Qinchan Li](https://qinchanli.github.io/), [Mingrui Zhao](https://mingrui-zhao.github.io/), [Kai Wang](https://kwang-ether.github.io/), [Hao Zhang](https://www.cs.sfu.ca/~haoz/)
+
 <p>
   <a href="https://arxiv.org/abs/2606.04108"><img src="https://img.shields.io/badge/Paper-arXiv-b31b1b.svg" alt="Paper"></a>
   <a href="https://huggingface.co/quantaji/SymTRELLIS"><img src="https://img.shields.io/badge/Hugging%20Face-Model-yellow" alt="Hugging Face Model"></a>
