@@ -19,7 +19,7 @@ Official code repository for **SymTRELLIS: Symmetry-Enforced Voxel Latents for 3
 - We enforce symmetry during generation, not as post-processing.
 - We support arbitrary 3D finite point group symmetries.
 - We do not retrain the flow model or VAE, and do not use generation-time optimization.
-- We train a lightweight spatial-transform latent mapper to average symmetry-transformed voxel latents.
+- We train a lightweight **spatial-transform latent mapper** to average rotated voxel latents.
 - The mapper does not require symmetric training data and is scalable.
 - The idea is inspired by linear constraints in generative modeling, also known as visual anagrams ([Visual Anagrams](https://dangeng.github.io/visual_anagrams/), [LookingGlass](https://lookingglass-lpw.github.io/)).
 - We also implement GPU-accelerated o-voxel representation encoding ([quantaji/o-voxel-gpu](https://github.com/quantaji/o-voxel-gpu)).
