@@ -45,7 +45,7 @@ def build_catalog(
     shape_paths = []
     for dataset_dir in dataset_dirs:
         dataset_dir = Path(dataset_dir).expanduser().resolve()
-        shape_paths.extend(sorted(str(p) for p in dataset_dir.glob("*.zip")))
+        shape_paths.extend(sorted(str(p) for p in dataset_dir.rglob("*.zip")))
 
     # Shuffle at archive granularity so all records of one shape stay together.
     rng = np.random.RandomState(seed)

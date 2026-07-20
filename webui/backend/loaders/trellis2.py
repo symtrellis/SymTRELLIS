@@ -33,7 +33,7 @@ TEXTURE_DECODER = "microsoft/TRELLIS.2-4B/ckpts/tex_dec_next_dc_f16c32_fp16"
 IMAGE_COND_MODEL = "facebook/dinov3-vitl16-pretrain-lvd1689m"
 REMBG_MODEL = "briaai/RMBG-2.0"
 
-SYMTRELLIS_REPO = "quantaji/SymTRELLIS"
+SYMTRELLIS_REPO = "symtrellis/SymTRELLIS"
 SPARSE_STRUCTURE_MAPPER = "trellis2_sparse_structure_neighbor_graph_finetune"
 SHAPE_MAPPER = "trellis2_shape_neighbor_graph_pretrain"
 

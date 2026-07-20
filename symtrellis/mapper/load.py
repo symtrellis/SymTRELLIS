@@ -44,7 +44,7 @@ PRETRAINED_MAPPER_PATHS = {
 
 def from_pretrained(
     model_id_or_path: str | Path,
-    repo_id: str = "quantaji/SymTRELLIS",
+    repo_id: str = "symtrellis/SymTRELLIS",
     revision: str | None = None,
     cache_dir: str | Path | None = None,
     token: str | bool | None = None,

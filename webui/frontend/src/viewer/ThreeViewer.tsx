@@ -702,7 +702,7 @@ export function ThreeViewer({ content, dagVisible, onOverlayPicked, theme }: Thr
             paper
           </a>
           |
-          <a href="https://github.com/quantaji/SymTRELLIS" target="_blank" rel="noreferrer">
+          <a href="https://github.com/symtrellis/SymTRELLIS" target="_blank" rel="noreferrer">
             code
           </a>
           )
