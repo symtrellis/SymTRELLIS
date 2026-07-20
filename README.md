@@ -9,7 +9,7 @@ Official code repository for **SymTRELLIS: Symmetry-Enforced Voxel Latents for 3
   <a href="https://huggingface.co/symtrellis/SymTRELLIS"><img src="https://img.shields.io/badge/Hugging%20Face-Model-yellow" alt="Hugging Face Model"></a>
   <a href="https://huggingface.co/spaces/quantaji/SymTRELLIS"><img src="https://img.shields.io/badge/Hugging%20Face-Demo-blueviolet" alt="Hugging Face Demo"></a>
   <a href="https://symtrellis.github.io/"><img src="https://img.shields.io/badge/Project-Website-blue" alt="Project Website"></a>
-  <a href="https://huggingface.co/datasets/symtrellis/SymTRELLIS-Training-Data"><img src="https://img.shields.io/badge/Hugging%20Face-Training%20Data%20(TBD)-orange" alt="Hugging Face Training Data"></a>
+  <a href="https://huggingface.co/datasets/symtrellis/SymTRELLIS-Latent-Transform-Pairs"><img src="https://img.shields.io/badge/Hugging%20Face-Training%20Data-orange" alt="Hugging Face Training Data"></a>
   <!-- <a href="https://huggingface.co/datasets/symtrellis/SymTRELLIS-Evaluation-Dataset"><img src="https://img.shields.io/badge/Hugging%20Face-Evaluation%20Dataset%20(TBD)-orange" alt="Hugging Face Evaluation Dataset"></a> -->
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License"></a>
 </p>
