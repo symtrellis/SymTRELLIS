@@ -6,11 +6,11 @@ Official code repository for **SymTRELLIS: Symmetry-Enforced Voxel Latents for 3
 
 <p>
   <a href="https://arxiv.org/abs/2606.04108"><img src="https://img.shields.io/badge/Paper-arXiv-b31b1b.svg" alt="Paper"></a>
-  <a href="https://huggingface.co/quantaji/SymTRELLIS"><img src="https://img.shields.io/badge/Hugging%20Face-Model-yellow" alt="Hugging Face Model"></a>
+  <a href="https://huggingface.co/symtrellis/SymTRELLIS"><img src="https://img.shields.io/badge/Hugging%20Face-Model-yellow" alt="Hugging Face Model"></a>
   <a href="https://huggingface.co/spaces/quantaji/SymTRELLIS"><img src="https://img.shields.io/badge/Hugging%20Face-Demo-blueviolet" alt="Hugging Face Demo"></a>
   <a href="https://symtrellis.github.io/"><img src="https://img.shields.io/badge/Project-Website-blue" alt="Project Website"></a>
-  <a href="https://huggingface.co/datasets/quantaji/SymTRELLIS-Training-Data"><img src="https://img.shields.io/badge/Hugging%20Face-Training%20Data%20(TBD)-orange" alt="Hugging Face Training Data"></a>
-  <a href="https://huggingface.co/datasets/quantaji/SymTRELLIS-Evaluation-Dataset"><img src="https://img.shields.io/badge/Hugging%20Face-Evaluation%20Dataset%20(TBD)-orange" alt="Hugging Face Evaluation Dataset"></a>
+  <a href="https://huggingface.co/datasets/symtrellis/SymTRELLIS-Training-Data"><img src="https://img.shields.io/badge/Hugging%20Face-Training%20Data%20(TBD)-orange" alt="Hugging Face Training Data"></a>
+  <!-- <a href="https://huggingface.co/datasets/symtrellis/SymTRELLIS-Evaluation-Dataset"><img src="https://img.shields.io/badge/Hugging%20Face-Evaluation%20Dataset%20(TBD)-orange" alt="Hugging Face Evaluation Dataset"></a> -->
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License"></a>
 </p>
 
@@ -50,7 +50,7 @@ docker run --rm --gpus all                                          \
   -e HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub             \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface"            \
   -v "$HOME/.config/huggingface:/root/.config/huggingface:ro"       \
-  ghcr.io/quantaji/symtrellis:inference-"$ENV_TAG"
+  ghcr.io/symtrellis/symtrellis:inference-"$ENV_TAG"
 ```
 
 ## BibTeX
