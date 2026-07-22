@@ -52,7 +52,7 @@ def extract_abo_file(
         if temporary.exists():
             temporary.unlink()
 
-    return {"sha256": sha256, "downloaded": raw_files.exists(sha256)}
+    return {"sha256": sha256, "raw": raw_files.exists(sha256)}
 
 
 class ABODataset(DatasetWorkspace):
@@ -65,7 +65,7 @@ class ABODataset(DatasetWorkspace):
         records = metadata[["sha256", "file_identifier"]].to_dict("records")
         pending = [record for record in records if raw_files.find(record["sha256"]) is None]
         if not pending:
-            return pd.DataFrame(columns=["sha256", "downloaded"])
+            return pd.DataFrame(columns=["sha256", "raw"])
 
         source_tar = self.path("abo-3dmodels.tar")
         if source_tar.is_file():
@@ -74,7 +74,6 @@ class ABODataset(DatasetWorkspace):
             source_url = "https://amazon-berkeley-objects.s3.amazonaws.com/archives/abo-3dmodels.tar"
             information_url = "https://amazon-berkeley-objects.s3.amazonaws.com/index.html"
             temporary = source_tar.with_name(f".{source_tar.name}.tmp")
-            self.mkdir()
             try:
                 with urlopen(source_url) as response, temporary.open("wb") as target:
                     content_length = response.headers.get("Content-Length")
@@ -84,7 +83,7 @@ class ABODataset(DatasetWorkspace):
 
                 tar_index = build_tar_index(temporary)
                 temporary.replace(source_tar)
-            except (HTTPException, OSError, URLError, tarfile.TarError) as error:
+            except (HTTPException, URLError, tarfile.TarError) as error:
                 raise FileNotFoundError("ABO archive download or validation failed. " f"Place abo-3dmodels.tar at {source_tar}, or download it from " f"{source_url}. More information: {information_url}") from error
             finally:
                 if temporary.exists():
@@ -109,7 +108,7 @@ class ABODataset(DatasetWorkspace):
             },
         )
         results = Pipeline([stage]).run(inputs)
-        return pd.DataFrame(results, columns=["sha256", "downloaded"]).drop_duplicates(
+        return pd.DataFrame(results, columns=["sha256", "raw"]).drop_duplicates(
             subset="sha256",
             keep="first",
         )

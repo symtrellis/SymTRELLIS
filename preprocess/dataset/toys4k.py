@@ -37,7 +37,7 @@ def extract_toys4k_file(
         if temporary.exists():
             temporary.unlink()
 
-    return {"sha256": sha256, "downloaded": raw_files.exists(sha256)}
+    return {"sha256": sha256, "raw": raw_files.exists(sha256)}
 
 
 class Toys4KDataset(DatasetWorkspace):
@@ -50,7 +50,7 @@ class Toys4KDataset(DatasetWorkspace):
         records = metadata[["sha256", "file_identifier"]].to_dict("records")
         pending = [record for record in records if raw_files.find(record["sha256"]) is None]
         if not pending:
-            return pd.DataFrame(columns=["sha256", "downloaded"])
+            return pd.DataFrame(columns=["sha256", "raw"])
 
         source_zip = self.path("toys4k_blend_files.zip")
         if not source_zip.is_file():
@@ -73,7 +73,7 @@ class Toys4KDataset(DatasetWorkspace):
             )
             results = Pipeline([stage]).run(inputs)
 
-        return pd.DataFrame(results, columns=["sha256", "downloaded"]).drop_duplicates(
+        return pd.DataFrame(results, columns=["sha256", "raw"]).drop_duplicates(
             subset="sha256",
             keep="first",
         )

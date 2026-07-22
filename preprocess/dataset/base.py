@@ -69,15 +69,15 @@ class DatasetWorkspace:
 
     def __init__(self, root: Union[str, Path]) -> None:
         object.__setattr__(self, "root", Path(root).expanduser().resolve())
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.path("merged_records").mkdir(parents=True, exist_ok=True)
+        self.path("unmerged_records").mkdir(parents=True, exist_ok=True)
 
     def get_metadata(self, args) -> pd.DataFrame:
         raise NotImplementedError
 
     def download(self, metadata: pd.DataFrame, num_workers: int) -> pd.DataFrame:
         raise NotImplementedError
-
-    def mkdir(self) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
 
     def path(self, rel_path: str) -> Path:
         if not isinstance(rel_path, str) or not rel_path:
@@ -99,5 +99,4 @@ class DatasetWorkspace:
         return metadata
 
     def write_metadata(self, metadata: pd.DataFrame) -> None:
-        self.mkdir()
         metadata.to_csv(self.path("metadata.csv"), index=False)

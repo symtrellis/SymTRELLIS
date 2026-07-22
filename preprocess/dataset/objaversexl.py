@@ -52,7 +52,7 @@ class ObjaverseXLDataset(DatasetWorkspace):
         records = metadata[["sha256"]].to_dict("records")
         pending = [record for record in records if raw_files.find(record["sha256"]) is None]
         if not pending:
-            return pd.DataFrame(columns=["sha256", "downloaded"])
+            return pd.DataFrame(columns=["sha256", "raw"])
 
         annotations = oxl.get_annotations()
         annotations = annotations[annotations["sha256"].isin([record["sha256"] for record in pending])]
@@ -67,8 +67,8 @@ class ObjaverseXLDataset(DatasetWorkspace):
         if cache_dir.exists():
             shutil.rmtree(cache_dir)
 
-        results = [{"sha256": record["sha256"], "downloaded": True} for record in pending if raw_files.find(record["sha256"]) is not None]
-        return pd.DataFrame(results, columns=["sha256", "downloaded"]).drop_duplicates(
+        results = [{"sha256": record["sha256"], "raw": True} for record in pending if raw_files.find(record["sha256"]) is not None]
+        return pd.DataFrame(results, columns=["sha256", "raw"]).drop_duplicates(
             subset="sha256",
             keep="first",
         )

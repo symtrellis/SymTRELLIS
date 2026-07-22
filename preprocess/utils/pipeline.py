@@ -730,13 +730,6 @@ class Pipeline:
             if self.error is not None:
                 raise self.error
             return list(self.results)
-        except BaseException as error:
-            self.fail(error, None, "pipeline", None)
-            failure = self.error
-            assert failure is not None
-            if failure is error:
-                raise
-            raise failure
         finally:
             self.close()
 
