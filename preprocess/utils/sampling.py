@@ -25,6 +25,18 @@ def hammersley_sequence(dim: int, index: int, num_samples: int) -> list[float]:
     return [index / num_samples, *halton_sequence(dim - 1, index)]
 
 
+def fibonacci_sphere_samples(num_samples: int) -> np.ndarray:
+    """Return evenly distributed unit directions on a sphere."""
+    indices = np.arange(num_samples, dtype=np.float64)
+    z = 1.0 - 2.0 * (indices + 0.5) / num_samples
+    radius = np.sqrt(1.0 - z * z)
+    azimuth = np.pi * (3.0 - np.sqrt(5.0)) * indices
+    return np.stack(
+        (radius * np.cos(azimuth), radius * np.sin(azimuth), z),
+        axis=1,
+    )
+
+
 def sphere_hammersley_sequence(
     index: int,
     num_samples: int,

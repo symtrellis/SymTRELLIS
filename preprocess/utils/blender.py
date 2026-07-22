@@ -7,11 +7,12 @@ from urllib.request import urlretrieve
 BLENDER_RELEASES = {
     "3.0.1": "https://download.blender.org/release/Blender3.0/blender-3.0.1-linux-x64.tar.xz",
     "4.5.1": "https://ftp.halifax.rwth-aachen.de/blender/release/Blender4.5/blender-4.5.1-linux-x64.tar.xz",
+    "5.1.2": "https://ftp.halifax.rwth-aachen.de/blender/release/Blender5.1/blender-5.1.2-linux-x64.tar.xz",
 }
 
 
 def install_blender(
-    version: str = "4.5.1",
+    version: str = "5.1.2",
     install_dir: Union[str, Path] = "/tmp",
 ) -> Path:
     installation = f"blender-{version}-linux-x64"
