@@ -41,9 +41,7 @@ class Task:
                 raise TypeError("every emitted result must be a mapping")
             patches = result
         else:
-            raise TypeError(
-                "a stage must return None, a mapping, or a list of mappings"
-            )
+            raise TypeError("a stage must return None, a mapping, or a list of mappings")
 
         payloads = []
         for patch in patches:
@@ -65,11 +63,7 @@ class Task:
                 payload,
                 self.root_id,
                 self.start + index * width,
-                (
-                    self.end
-                    if index + 1 == len(payloads)
-                    else self.start + (index + 1) * width
-                ),
+                (self.end if index + 1 == len(payloads) else self.start + (index + 1) * width),
             )
             for index, payload in enumerate(payloads)
         ]
@@ -149,9 +143,7 @@ class BatchPolicy:
         if all(present):
             return [task.payload[name] for task in unit]
         if any(present):
-            raise ValueError(
-                f"batch argument {name!r} is missing from part of the batch"
-            )
+            raise ValueError(f"batch argument {name!r} is missing from part of the batch")
         raise KeyError(name)
 
     def map_result(self, unit: tuple[Task, ...], result: Any) -> list[Task]:
@@ -194,9 +186,7 @@ class GroupPolicy:
             size = payload[self.size_field]
             position = payload[self.position_field]
         except KeyError as error:
-            raise ValueError(
-                f"group metadata field {error.args[0]!r} is missing"
-            ) from error
+            raise ValueError(f"group metadata field {error.args[0]!r} is missing") from error
 
         if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
             raise ValueError(f"group size must be a positive integer, got {size!r}")
@@ -238,8 +228,7 @@ class GroupPolicy:
             if now - started_at >= self.timeout_s:
                 root_id, key = group_id
                 raise TimeoutError(
-                    f"group {key!r} for root {root_id} timed out: "
-                    f"received {self.counts[group_id]} of {self.sizes[group_id]}",
+                    f"group {key!r} for root {root_id} timed out: " f"received {self.counts[group_id]} of {self.sizes[group_id]}",
                 )
         return []
 
@@ -248,8 +237,7 @@ class GroupPolicy:
         if incomplete:
             _, key = incomplete[0]
             raise RuntimeError(
-                f"root {root_id} closed with incomplete group {key!r}: "
-                f"received {self.counts[incomplete[0]]} of {self.sizes[incomplete[0]]}",
+                f"root {root_id} closed with incomplete group {key!r}: " f"received {self.counts[incomplete[0]]} of {self.sizes[incomplete[0]]}",
             )
         return []
 
@@ -258,8 +246,7 @@ class GroupPolicy:
             group_id = next(iter(self.slots))
             root_id, key = group_id
             raise RuntimeError(
-                f"input closed with incomplete group {key!r} for root {root_id}: "
-                f"received {self.counts[group_id]} of {self.sizes[group_id]}",
+                f"input closed with incomplete group {key!r} for root {root_id}: " f"received {self.counts[group_id]} of {self.sizes[group_id]}",
             )
         return []
 
@@ -271,9 +258,7 @@ class GroupPolicy:
         if all(present):
             return [task.payload[name] for task in unit]
         if any(present):
-            raise ValueError(
-                f"group argument {name!r} is missing from part of the group"
-            )
+            raise ValueError(f"group argument {name!r} is missing from part of the group")
         raise KeyError(name)
 
     def map_result(self, unit: tuple[Task, ...], result: Any) -> list[Task]:
@@ -316,13 +301,8 @@ class Stage:
         if isinstance(workers, bool) or not isinstance(workers, int) or workers <= 0:
             raise ValueError(f"stage {name!r} workers must be a positive integer")
         queue_sizes = (queue_size, work_queue_size)
-        if any(
-            isinstance(size, bool) or not isinstance(size, int) or size < 0
-            for size in queue_sizes
-        ):
-            raise ValueError(
-                f"stage {name!r} queue sizes must be non-negative integers"
-            )
+        if any(isinstance(size, bool) or not isinstance(size, int) or size < 0 for size in queue_sizes):
+            raise ValueError(f"stage {name!r} queue sizes must be non-negative integers")
 
         self.name = name
         self.fn = fn
@@ -344,19 +324,11 @@ class Stage:
                         group_timeout_s,
                     )
                 ):
-                    raise ValueError(
-                        f"item stage {name!r} received batch/group options"
-                    )
+                    raise ValueError(f"item stage {name!r} received batch/group options")
                 self.policy = ItemPolicy()
             case "batch":
-                if (
-                    isinstance(batch_size, bool)
-                    or not isinstance(batch_size, int)
-                    or batch_size <= 0
-                ):
-                    raise ValueError(
-                        f"batch stage {name!r} requires a positive batch_size"
-                    )
+                if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+                    raise ValueError(f"batch stage {name!r} requires a positive batch_size")
                 if any(
                     value is not None
                     for value in (
@@ -422,9 +394,7 @@ class Stage:
         unknown_fixed = set(self.fixed_arguments).difference(declared_names)
         if unknown_fixed and not self.accepts_kwargs:
             names = ", ".join(sorted(unknown_fixed))
-            raise ValueError(
-                f"stage {name!r} function does not accept fixed arguments: {names}"
-            )
+            raise ValueError(f"stage {name!r} function does not accept fixed arguments: {names}")
 
         self.pipeline: Pipeline | None = None
         self.index: int | None = None
@@ -532,9 +502,7 @@ class Stage:
                     case "stop":
                         return
                     case _:
-                        raise ValueError(
-                            f"stage {self.name!r} received unknown event {kind!r}"
-                        )
+                        raise ValueError(f"stage {self.name!r} received unknown event {kind!r}")
 
                 self.queue_units(units)
                 self.advance_completion()
@@ -593,17 +561,13 @@ class Stage:
                     ]
                 pipeline.fail(error, self.name, "worker", task_context)
 
-    def build_arguments(
-        self, unit: tuple[Task, ...]
-    ) -> tuple[list[Any], dict[str, Any]]:
+    def build_arguments(self, unit: tuple[Task, ...]) -> tuple[list[Any], dict[str, Any]]:
         args = []
         kwargs = {}
 
         for name in self.fixed_arguments:
             if any(name in task.payload for task in unit):
-                raise ValueError(
-                    f"argument {name!r} exists in both task data and stage configuration"
-                )
+                raise ValueError(f"argument {name!r} exists in both task data and stage configuration")
 
         for name, default in self.positional_plan:
             if name in self.fixed_arguments:
@@ -627,9 +591,7 @@ class Stage:
                     raise ValueError(f"required argument {name!r} is missing") from None
 
         if self.accepts_kwargs:
-            planned_names = {
-                name for name, _ in self.positional_plan + self.keyword_plan
-            }
+            planned_names = {name for name, _ in self.positional_plan + self.keyword_plan}
             payload_names = set().union(*(task.payload.keys() for task in unit))
             for name in payload_names.difference(planned_names, self.fixed_arguments):
                 kwargs[name] = self.policy.task_argument(unit, name)
@@ -670,12 +632,7 @@ class Stage:
                 self.forwarded_roots.add(root_id)
 
             roots_complete = self.closed_roots.issubset(self.forwarded_roots)
-            if (
-                self.input_closed
-                and not self.input_forwarded
-                and not self.pending_by_root
-                and roots_complete
-            ):
+            if self.input_closed and not self.input_forwarded and not self.pending_by_root and roots_complete:
                 if self.next_stage is None:
                     self.pipeline.input_finished()
                 else:
@@ -715,15 +672,9 @@ class Pipeline:
         self.stages = list(stages)
         if not self.stages:
             raise ValueError("a pipeline requires at least one stage")
-        if max_active_roots is not None and (
-            isinstance(max_active_roots, bool)
-            or not isinstance(max_active_roots, int)
-            or max_active_roots <= 0
-        ):
+        if max_active_roots is not None and (isinstance(max_active_roots, bool) or not isinstance(max_active_roots, int) or max_active_roots <= 0):
             raise ValueError("max_active_roots must be None or a positive integer")
-        if total is not None and (
-            isinstance(total, bool) or not isinstance(total, int) or total < 0
-        ):
+        if total is not None and (isinstance(total, bool) or not isinstance(total, int) or total < 0):
             raise ValueError("total must be None or a non-negative integer")
 
         self.max_active_roots = max_active_roots
@@ -754,14 +705,10 @@ class Pipeline:
                 try:
                     self.total = len(inputs)  # type: ignore[arg-type]
                 except TypeError as error:
-                    raise ValueError(
-                        "inputs must have len(), or total must be provided"
-                    ) from error
+                    raise ValueError("inputs must have len(), or total must be provided") from error
 
             for index, stage in enumerate(self.stages):
-                next_stage = (
-                    self.stages[index + 1] if index + 1 < len(self.stages) else None
-                )
+                next_stage = self.stages[index + 1] if index + 1 < len(self.stages) else None
                 stage.bind(self, index, next_stage)
             for stage in self.stages:
                 stage.start()
@@ -769,16 +716,12 @@ class Pipeline:
             count = 0
             for root_id, payload in enumerate(inputs):
                 if root_id >= self.total:
-                    raise ValueError(
-                        f"inputs contains more than the declared total {self.total}"
-                    )
+                    raise ValueError(f"inputs contains more than the declared total {self.total}")
                 self.wait_for_slot()
                 self.feed_root(root_id, payload)
                 count += 1
             if count != self.total:
-                raise ValueError(
-                    f"inputs contains {count} items but total is {self.total}"
-                )
+                raise ValueError(f"inputs contains {count} items but total is {self.total}")
 
             self.stages[0].submit("input_closed")
             with self.condition:
@@ -857,13 +800,9 @@ class Pipeline:
     ) -> None:
         with self.condition:
             if self.error is None:
-                location = (
-                    f"stage {stage!r} {boundary}" if stage is not None else boundary
-                )
+                location = f"stage {stage!r} {boundary}" if stage is not None else boundary
                 detail = f"; task={task_context!r}" if task_context is not None else ""
-                wrapped = RuntimeError(
-                    f"pipeline failed at {location}{detail}: {error}"
-                )
+                wrapped = RuntimeError(f"pipeline failed at {location}{detail}: {error}")
                 wrapped.__cause__ = error
                 self.error = wrapped
             self.stop_event.set()

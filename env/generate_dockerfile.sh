@@ -55,7 +55,7 @@ PURE_PYTHON_PACKAGES=(
     black ipykernel notebook jupyterlab numpy scipy pandas tqdm pillow
     imageio imageio-ffmpeg opencv-python-headless trimesh open3d pymeshfix
     pyvista xatlas "huggingface_hub[cli]" "transformers<5.4.0" safetensors easydict
-    tensorboard lpips rembg onnxruntime open_clip_torch objaverse astor
+    tensorboard lpips rembg onnxruntime open_clip_torch objaverse>=0.1.7 astor
     optree roma point-cloud-utils seaborn==0.13.2 gradio==5.49.0
     matplotlib plotly kornia timm zstandard einops iopath scikit-image
     plyfile pygltflib ipycanvas ipyevents usd-core warp-lang
