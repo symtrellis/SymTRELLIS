@@ -692,9 +692,20 @@ class Pipeline:
         self.progress_values = [0.0] * len(self.stages)
         self.progress_bars = []
         if progress:
+            name_width = max(len(stage.name) for stage in self.stages)
+            bar_format = (
+                "{desc} |{bar}| {percentage:5.1f}% [{elapsed}<{remaining}, {rate_fmt}]"
+            )
             for index, stage in enumerate(self.stages):
                 self.progress_bars.append(
-                    tqdm(total=1.0, desc=stage.name, position=index, leave=True),
+                    tqdm(
+                        total=1.0,
+                        desc=stage.name.ljust(name_width),
+                        position=index,
+                        leave=True,
+                        dynamic_ncols=True,
+                        bar_format=bar_format,
+                    ),
                 )
 
     def run(self, inputs: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

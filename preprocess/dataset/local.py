@@ -58,7 +58,6 @@ class LocalDataset(DatasetWorkspace):
                 "original_path": record["original_path"],
             }
             for record in records
-            if not raw_files.exists(record["sha256"])
         ]
 
         stage = Stage(

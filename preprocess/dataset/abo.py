@@ -63,8 +63,7 @@ class ABODataset(DatasetWorkspace):
     def download(self, metadata: pd.DataFrame, num_workers: int) -> pd.DataFrame:
         raw_files = self.files("raw", "")
         records = metadata[["sha256", "file_identifier"]].to_dict("records")
-        pending = [record for record in records if raw_files.find(record["sha256"]) is None]
-        if not pending:
+        if not records:
             return pd.DataFrame(columns=["sha256", "raw"])
 
         source_tar = self.path("abo-3dmodels.tar")
@@ -95,7 +94,7 @@ class ABODataset(DatasetWorkspace):
                 "sha256": record["sha256"],
                 "filename": f"3dmodels/original/{record['file_identifier']}",
             }
-            for record in pending
+            for record in records
         ]
         stage = Stage(
             "download",
