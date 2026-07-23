@@ -1,6 +1,12 @@
 from .blender import install_blender
 from .files import build_tar_index, read_file_bytes, sha256_bytes, sha256_file, write_file_bytes
-from .geometry import approx_miniball_radius, sample_mesh_srt, small_rotation_perturbation_samples, sobol_rotation_samples
+from .geometry import (
+    approx_miniball_radius,
+    mesh_to_voxel_coords,
+    sample_mesh_srt,
+    small_rotation_perturbation_samples,
+    sobol_rotation_samples,
+)
 from .pipeline import Pipeline, Stage, Task
 from .sampling import (
     fibonacci_sphere_samples,
@@ -20,6 +26,7 @@ __all__ = [
     "halton_sequence",
     "hammersley_sequence",
     "install_blender",
+    "mesh_to_voxel_coords",
     "radical_inverse",
     "read_file_bytes",
     "sample_mesh_srt",

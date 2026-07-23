@@ -24,8 +24,6 @@ import trellis.modules.sparse as trellis_sp
 import utils3d
 from huggingface_hub import hf_hub_download
 from hydra.utils import instantiate
-from kaolin.ops.conversions import unbatched_mesh_to_spc
-from kaolin.ops.spc import generate_points, scan_octrees, unbatched_get_level_points
 from omegaconf import OmegaConf
 from PIL import Image
 from sam3d_objects.model.backbone.tdfy_dit.modules import sparse as sam3d_sp
@@ -33,7 +31,7 @@ from sam3d_objects.model.backbone.tdfy_dit.modules.sparse.basic import SparseTen
 
 from dataset.base import format_entry_name
 from preprocess.dataset.base import DatasetFiles, DatasetWorkspace
-from preprocess.utils import Pipeline, Stage, sample_mesh_srt
+from preprocess.utils import Pipeline, Stage, mesh_to_voxel_coords, sample_mesh_srt
 
 VOXEL_RESOLUTION = 64
 
@@ -271,16 +269,7 @@ def dino_aggregate(
     vertices = vertices.to(device=device, dtype=torch.float32)
     faces = faces.to(device=device, dtype=torch.int64)
 
-    # Kaolin voxelizes [-1, 1]^3 while posed meshes occupy [-0.5, 0.5]^3.
-    face_vertices = vertices[faces] * 2
-    voxel_level = int(math.log2(VOXEL_RESOLUTION))
-    octree, _, _ = unbatched_mesh_to_spc(face_vertices, level=voxel_level)
-    lengths = torch.tensor([octree.numel()], dtype=torch.int32)
-    _, pyramids, exsum = scan_octrees(octree, lengths)
-    point_hierarchy = generate_points(octree, pyramids, exsum)
-    voxels = unbatched_get_level_points(point_hierarchy, pyramids[0], level=voxel_level).to(torch.int32)
-    if len(voxels) == 0:
-        raise ValueError("mesh voxelization is empty")
+    voxels = mesh_to_voxel_coords(vertices, faces, VOXEL_RESOLUTION)
 
     voxel_positions = (voxels.to(torch.float32) + 0.5) / VOXEL_RESOLUTION - 0.5
     feature_dim = int(dino_model.embed_dim)
@@ -291,8 +280,7 @@ def dino_aggregate(
     std = torch.tensor([0.229, 0.224, 0.225], device=device).reshape(1, 3, 1, 1)
     depth_tolerance = math.sqrt(3) / (2 * VOXEL_RESOLUTION)
 
-    del vertices, faces, face_vertices
-    del octree, lengths, pyramids, exsum, point_hierarchy
+    del vertices, faces
 
     for start in range(0, num_views, view_chunk_size):
         end = min(start + view_chunk_size, num_views)

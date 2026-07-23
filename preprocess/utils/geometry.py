@@ -2,6 +2,8 @@ import math
 from typing import Tuple
 
 import torch
+from kaolin.ops.conversions import unbatched_mesh_to_spc
+from kaolin.ops.spc import generate_points, scan_octrees, unbatched_get_level_points
 from pytorch3d.transforms import axis_angle_to_matrix, quaternion_to_matrix
 
 
@@ -67,6 +69,31 @@ def small_rotation_perturbation_samples(
     """Sample isotropic Gaussian axis-angle perturbations."""
     rotvec = torch.randn(n, 3, device=device, generator=generator) * std_rad
     return axis_angle_to_matrix(rotvec)  # [n, 3, 3]
+
+
+def mesh_to_voxel_coords(
+    vertices: torch.Tensor,
+    faces: torch.Tensor,
+    resolution: int,
+) -> torch.Tensor:
+    """Voxelize a mesh in [-0.5, 0.5]^3 and return integer XYZ coordinates."""
+    if resolution <= 0 or resolution & (resolution - 1):
+        raise ValueError("resolution must be a positive power of two")
+
+    face_vertices = vertices[faces] * 2
+    level = int(math.log2(resolution))
+    octree, _, _ = unbatched_mesh_to_spc(face_vertices, level=level)
+    lengths = torch.tensor([octree.numel()], dtype=torch.int32)
+    _, pyramids, exsum = scan_octrees(octree, lengths)
+    point_hierarchy = generate_points(octree, pyramids, exsum)
+    coords = unbatched_get_level_points(
+        point_hierarchy,
+        pyramids[0],
+        level=level,
+    ).to(torch.int32)
+    if len(coords) == 0:
+        raise ValueError("mesh voxelization is empty")
+    return coords
 
 
 def sample_mesh_srt(
