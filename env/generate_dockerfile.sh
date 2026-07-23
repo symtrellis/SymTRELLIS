@@ -55,9 +55,9 @@ PURE_PYTHON_PACKAGES=(
     black ipykernel notebook jupyterlab numpy scipy pandas tqdm pillow
     imageio imageio-ffmpeg opencv-python-headless trimesh open3d pymeshfix
     pyvista xatlas "huggingface_hub[cli]" "transformers<5.4.0" safetensors easydict
-    tensorboard lpips rembg onnxruntime open_clip_torch objaverse>=0.1.7 astor
+    tensorboard lpips rembg onnxruntime open_clip_torch "objaverse>=0.1.7" astor
     optree roma point-cloud-utils seaborn==0.13.2 gradio==5.49.0
-    matplotlib plotly kornia timm zstandard einops iopath scikit-image
+    matplotlib plotly kornia timm zstandard einops iopath scikit-image hydra-core~=1.3.2
     plyfile pygltflib ipycanvas ipyevents usd-core warp-lang
     fastapi uvicorn python-multipart
 )
@@ -87,6 +87,10 @@ RUNTIME_GPU_IMPORTS=(
 )
 
 SYMTRELLIS_IMPORTS=(
+    trellis
+    trellis.representations.mesh.flexicubes.flexicubes
+    trellis2
+    sam3d_objects
     symtrellis
     symtrellis.geometry.neighbors.sparse_lattice_ext._C
     symtrellis.mapper.attention.csr_attn_ext._C
@@ -847,6 +851,7 @@ ENV CUDA_PATH=/usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:\$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:\$LD_LIBRARY_PATH
 ENV FORCE_CUDA=1
+ENV LIDRA_SKIP_INIT=1
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}"
 
 EOF
@@ -1037,6 +1042,9 @@ RUN --mount=type=bind,source=.,target=/mnt/repo,ro \
  && cd /workspace/SymTRELLIS \
  && git checkout --detach "${SYMTRELLIS_REF}" \
  && git submodule update --init --recursive \
+ && python -m pip install --no-cache-dir --no-deps --no-build-isolation \
+    third_party/trellis third_party/trellis2 \
+ && python -m pip install --no-cache-dir --no-deps third_party/sam3d_objects \
  && python -m pip install --no-cache-dir . --no-build-isolation \
  && rm -rf /workspace/SymTRELLIS/symtrellis \
  && (python -m pip cache purge || true) \

@@ -1,17 +1,9 @@
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.nn.functional as F
 from torch.amp.autocast_mode import autocast
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TRELLIS2_ROOT = REPO_ROOT / "third_party" / "trellis2"
-# TRELLIS-specific imports stay in the task layer so base training remains package-local.
-if str(TRELLIS2_ROOT) not in sys.path:
-    sys.path.append(str(TRELLIS2_ROOT))
 
 import trellis2.models as trellis2_models
 from trellis2.modules.sparse import SparseTensor

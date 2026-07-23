@@ -78,7 +78,7 @@ def sample_mesh_srt(
     perturbation_rad_std: float,
     shape_latent_resolution: int,
     seed: int,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
     """Normalize vertices and sample scale, rotation, inversion, and translation."""
     if not torch.isfinite(vertices).all():
         raise ValueError("vertices contain non-finite values")
@@ -154,4 +154,4 @@ def sample_mesh_srt(
     transforms[..., :3, :3] = rotation_scales
     transforms[..., :3, 3] = translations
     transforms[..., 3, 3] = 1.0
-    return transformed_vertices, transforms
+    return transformed_vertices, transforms, center, base_scale

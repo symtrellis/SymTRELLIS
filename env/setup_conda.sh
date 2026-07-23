@@ -69,8 +69,8 @@ PURE_PYTHON_PACKAGES=(
     black ipykernel notebook jupyterlab numpy scipy pandas tqdm pillow
     imageio imageio-ffmpeg opencv-python-headless trimesh open3d pymeshfix
     pyvista xatlas "huggingface_hub[cli]" "transformers<5.4.0" safetensors easydict
-    tensorboard lpips rembg open_clip_torch objaverse>=0.1.7 astor onnxruntime optree roma
-    point-cloud-utils seaborn==0.13.2 gradio==5.49.0 matplotlib plotly
+    tensorboard lpips rembg open_clip_torch "objaverse>=0.1.7" astor onnxruntime optree roma
+    point-cloud-utils seaborn==0.13.2 gradio==5.49.0 matplotlib plotly hydra-core~=1.3.2
     kornia timm zstandard einops iopath scikit-image plyfile pygltflib
     ipycanvas ipyevents usd-core warp-lang fastapi uvicorn python-multipart
 )
@@ -148,7 +148,7 @@ Notes:
   - --only-stage STAGE forces only STAGE to reinstall and skips the final full import check.
   - Existing conda environments are resumed only when their saved plan matches.
   - Resume state is stored under $CONDA_PREFIX/.symtrellis-setup and is removed with the env.
-  - hydra-core and omegaconf are intentionally not installed.
+  - omegaconf is installed through hydra-core.
   - webui/frontend dependencies are installed, but webui/frontend/dist is not built.
   - pip is always run with --no-cache-dir and its script-local cache is purged.
 EOF
@@ -1092,6 +1092,7 @@ write_activation_hook() {
         printf '%s\n' 'export CUDA_PATH="${CONDA_PREFIX}"'
         printf '%s\n' 'export FORCE_CUDA=1'
         printf '%s\n' 'export BUILD_WITH_CUDA=1'
+        printf '%s\n' 'export LIDRA_SKIP_INIT=1'
         printf '%s\n' 'export PIP_NO_CACHE_DIR=1'
         printf '%s\n' 'export PIP_DISABLE_PIP_VERSION_CHECK=1'
         printf 'export TORCH_CUDA_ARCH_LIST=%q\n' "$TORCH_CUDA_ARCH_LIST"
@@ -1110,6 +1111,7 @@ export_current_build_env() {
     export CUDA_PATH="${CONDA_PREFIX}"
     export FORCE_CUDA=1
     export BUILD_WITH_CUDA=1
+    export LIDRA_SKIP_INIT=1
     export TORCH_CUDA_ARCH_LIST
     export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${CONDA_PREFIX}/lib64:${LD_LIBRARY_PATH:-}"
     export LIBRARY_PATH="${CONDA_PREFIX}/lib/stubs:${CONDA_PREFIX}/lib:${LIBRARY_PATH:-}"
@@ -1287,9 +1289,12 @@ install_ovoxel() {
 }
 
 install_symtrellis() {
-    section "Install SymTRELLIS from current repository"
+    section "Install vendored Python packages and SymTRELLIS"
     prepare_build_env
     cd "$REPO_DIR"
+    pip_install_command --no-deps --no-build-isolation third_party/trellis
+    pip_install_command --no-deps --no-build-isolation third_party/trellis2
+    pip_install_command --no-deps third_party/sam3d_objects
     pip_install_command --no-deps --no-build-isolation .
     pip_cleanup
 }
@@ -1470,6 +1475,10 @@ verify_ovoxel() {
 verify_symtrellis() {
     verify_torch_stack
     verify_imports \
+        trellis \
+        trellis.representations.mesh.flexicubes.flexicubes \
+        trellis2 \
+        sam3d_objects \
         symtrellis \
         symtrellis.geometry.neighbors.sparse_lattice_ext._C \
         symtrellis.mapper.attention.csr_attn_ext._C

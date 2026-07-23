@@ -1,10 +1,4 @@
-import sys
-from pathlib import Path
 from typing import cast
-
-trellis2_root = Path(__file__).resolve().parents[3] / "third_party" / "trellis2"
-if str(trellis2_root) not in sys.path:
-    sys.path.insert(0, str(trellis2_root))
 
 import trellis2.models as trellis2_model_registry
 from trellis2.models.sc_vaes.fdg_vae import FlexiDualGridVaeDecoder

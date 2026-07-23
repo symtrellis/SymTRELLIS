@@ -4,10 +4,8 @@ import argparse
 import hashlib
 import io
 import pickle
-import sys
 import zipfile
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
@@ -17,17 +15,10 @@ import torch
 from dataset.base import format_entry_name
 from preprocess.dataset.base import DatasetFiles, DatasetWorkspace
 from preprocess.utils import Pipeline, Stage, sample_mesh_srt
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TRELLIS2_ROOT = REPO_ROOT / "third_party" / "trellis2"
-if str(TRELLIS2_ROOT) not in sys.path:
-    sys.path.append(str(TRELLIS2_ROOT))
-
-# TRELLIS2 and o-voxel are vendored outside the repository's Python packages.
-import trellis2.models as trellis2_models  # noqa: E402
-import trellis2.modules.sparse as sp  # noqa: E402
-from o_voxel.convert.flexible_dual_grid import mesh_to_flexible_dual_grid  # noqa: E402
-from trellis2.models.sc_vaes.fdg_vae import FlexiDualGridVaeEncoder  # noqa: E402
+import trellis2.models as trellis2_models
+import trellis2.modules.sparse as sp
+from o_voxel.convert.flexible_dual_grid import mesh_to_flexible_dual_grid
+from trellis2.models.sc_vaes.fdg_vae import FlexiDualGridVaeEncoder
 
 MESH_REL_PATH = "trellis2/dumped_mesh"
 
@@ -70,7 +61,7 @@ def loader_srt_sampler(
         raise ValueError(f"non-finite verts: {sha256}")
 
     shape_seed = int.from_bytes(hashlib.sha256(f"{sha256}:{seed}".encode("ascii")).digest()[:8], "big")
-    transformed_vertices, transforms = sample_mesh_srt(
+    transformed_vertices, transforms, _, _ = sample_mesh_srt(
         vertices_tensor,
         num_scale,
         min_scale,
