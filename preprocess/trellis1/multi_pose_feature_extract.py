@@ -22,13 +22,14 @@ import torch.nn.functional as F
 import trellis.models as trellis1_models
 import trellis.modules.sparse as trellis_sp
 import utils3d
-from hydra.utils import instantiate
 from huggingface_hub import hf_hub_download
+from hydra.utils import instantiate
 from kaolin.ops.conversions import unbatched_mesh_to_spc
 from kaolin.ops.spc import generate_points, scan_octrees, unbatched_get_level_points
 from omegaconf import OmegaConf
-from PIL import ImageØ
+from PIL import Image
 from sam3d_objects.model.backbone.tdfy_dit.modules import sparse as sam3d_sp
+from sam3d_objects.model.backbone.tdfy_dit.modules.sparse.basic import SparseTensor as Sam3DSparseTensor
 
 from dataset.base import format_entry_name
 from preprocess.dataset.base import DatasetFiles, DatasetWorkspace
@@ -300,7 +301,7 @@ def dino_aggregate(
         extrinsic_chunk = target_extrinsics[start:end].to(device=device, dtype=torch.float32)
         intrinsic_chunk = target_intrinsics[start:end].to(device=device, dtype=torch.float32)
 
-        grid = F.affine_grid(affine_chunk, torch.Size((end - start, 3, 518, 518)), align_corners=False)
+        grid = F.affine_grid(affine_chunk, [end - start, 3, 518, 518], align_corners=False)
         images = F.grid_sample(source_chunk, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
         images = (images - mean) / std
 
@@ -332,11 +333,12 @@ def dino_aggregate(
             trellis1_feature_sum[voxel_start:voxel_end] += sampled.sum(dim=0).transpose(0, 1)
             sam3d_feature_sum[voxel_start:voxel_end] += (sampled * visible.unsqueeze(1)).sum(dim=0).transpose(0, 1)
             sam3d_visible_count[voxel_start:voxel_end] += visible.sum(dim=0)
+            del sampled, visible
 
         del source_chunk, affine_chunk, extrinsic_chunk, intrinsic_chunk
         del grid, images, tokens, feature_chunk, uv_ndc, linear_depth
         del valid_projection, pixel_x, pixel_y, pixel_index
-        del surface_depth, reference_depth, visibility, sampled, visible
+        del surface_depth, reference_depth, visibility
 
     trellis1_features = trellis1_feature_sum.div_(num_views).cpu()
     sam3d_features = sam3d_feature_sum.div_(sam3d_visible_count.clamp_min_(1).unsqueeze(1)).cpu()
@@ -376,7 +378,7 @@ def sam3d_slat_encode(
     device = next(encoder.parameters()).device
     voxels = voxels.to(device=device, dtype=torch.int32)
     coords = torch.cat((torch.zeros_like(voxels[:, :1]), voxels), dim=1)
-    sparse_input = sam3d_sp.SparseTensor(
+    sparse_input = Sam3DSparseTensor(
         feats=features.to(device=device, dtype=torch.float32),
         coords=coords,
     )

@@ -11,14 +11,14 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 import torch
+import trellis2.models as trellis2_models
+from o_voxel.convert.flexible_dual_grid import mesh_to_flexible_dual_grid
+from trellis2.models.sc_vaes.fdg_vae import FlexiDualGridVaeEncoder
+from trellis2.modules.sparse.basic import SparseTensor
 
 from dataset.base import format_entry_name
 from preprocess.dataset.base import DatasetFiles, DatasetWorkspace
 from preprocess.utils import Pipeline, Stage, sample_mesh_srt
-import trellis2.models as trellis2_models
-import trellis2.modules.sparse as sp
-from o_voxel.convert.flexible_dual_grid import mesh_to_flexible_dual_grid
-from trellis2.models.sc_vaes.fdg_vae import FlexiDualGridVaeEncoder
 
 MESH_REL_PATH = "trellis2/dumped_mesh"
 
@@ -147,11 +147,11 @@ def shape_latent_encode_worker(
         ],
         dim=1,
     )
-    vertices_sp = sp.SparseTensor(
+    vertices_sp = SparseTensor(
         feats=dual_vertices.to(dtype=torch.float32),
         coords=coords,
     )
-    intersected_sp = sp.SparseTensor(
+    intersected_sp = SparseTensor(
         feats=intersected.to(dtype=torch.bool),
         coords=coords,
     )
