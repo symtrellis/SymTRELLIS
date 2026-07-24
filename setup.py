@@ -5,7 +5,7 @@ from setuptools import find_packages, setup
 try:
     from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 except ImportError as exc:
-    raise RuntimeError("Building SymTRELLIS CUDA extensions must use the PyTorch installed in " "the current conda environment. pip build isolation hides that PyTorch. " "Run `pip install -e . --no-build-isolation` instead.") from exc
+    raise RuntimeError("Building SymTRELLIS CUDA extensions requires PyTorch in the active " "Python environment. Install PyTorch first and build with " "`python -m build --wheel --no-isolation`.") from exc
 
 
 os.environ.setdefault("MAX_JOBS", str(os.cpu_count() or 1))
@@ -13,7 +13,13 @@ os.environ.setdefault("MAX_JOBS", str(os.cpu_count() or 1))
 
 setup(
     name="symtrellis",
-    packages=find_packages(),
+    version="0.0.1",
+    packages=find_packages(
+        include=[
+            "symtrellis",
+            "symtrellis.*",
+        ]
+    ),
     package_data={
         "symtrellis.geometry.neighbors.sparse_lattice_ext": ["_C.pyi"],
         "symtrellis.mapper.attention.csr_attn_ext": ["_C.pyi"],
