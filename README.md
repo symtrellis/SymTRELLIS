@@ -42,16 +42,177 @@ ENV_TAG=torch2.9.0-cu130-py312
 # torch2.7.0-cu128-py311
 # torch2.6.0-cu124-py310
 
+mkdir -p \
+  "$HOME/.cache/huggingface" \
+  "$HOME/.config/huggingface" \
+  "$HOME/.cache/triton"
+
 docker run --rm --gpus all                                          \
   -p 7860:7860                                                      \
   -e SYMTRELLIS_WEBUI_SESSION_TIMEOUT_SECONDS=315360000             \
   -e SYMTRELLIS_WEBUI_CLEANUP_INTERVAL_SECONDS=300                  \
   -e HF_HOME=/root/.cache/huggingface                               \
   -e HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub             \
+  -e TRITON_CACHE_DIR=/root/.cache/triton                           \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface"            \
   -v "$HOME/.config/huggingface:/root/.config/huggingface:ro"       \
+  -v "$HOME/.cache/triton:/root/.cache/triton"                      \
   ghcr.io/symtrellis/symtrellis:inference-"$ENV_TAG"
 ```
+
+## Training
+
+### Data
+
+Code for preparing the training data is provided in [`preprocess/`](preprocess/). The preprocessed data can also be downloaded from the [SymTRELLIS Latent Transform Pairs](https://huggingface.co/datasets/symtrellis/SymTRELLIS-Latent-Transform-Pairs) dataset.
+
+### Sparse Structure Mapper Pretraining
+
+Set `MODEL_BACKEND` to either `neighbor_graph` or `swin3d`.
+
+```bash
+MODEL_BACKEND="neighbor_graph"
+DATASET_ROOT="<dataset-root>"
+TRAIN_OUTPUT_DIR="<training-output-dir>"
+
+mkdir -p \
+  "$TRAIN_OUTPUT_DIR" \
+  "$HOME/.cache/cuda_compute_cache" \
+  "$HOME/.cache/triton" \
+  "$HOME/.cache/huggingface" \
+  "$HOME/.config/huggingface"
+
+docker run --rm --gpus all --ipc=host \
+  --user "$(id -u):$(id -g)" \
+  -e PYTHONUNBUFFERED=1 \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e PYTORCH_ALLOC_CONF=expandable_segments:True \
+  -e CUDA_CACHE_PATH=/cuda-cache \
+  -e CUDA_CACHE_MAXSIZE=2147483648 \
+  -e TRITON_CACHE_DIR=/triton-cache \
+  -e HF_HOME=/hf-cache \
+  -e HF_HUB_CACHE=/hf-cache/hub \
+  -e XDG_CONFIG_HOME=/tmp/.config \
+  -e HOME=/tmp/user-home \
+  -v "$HOME/.cache/cuda_compute_cache:/cuda-cache" \
+  -v "$HOME/.cache/triton:/triton-cache" \
+  -v "$HOME/.cache/huggingface:/hf-cache" \
+  -v "$HOME/.config/huggingface:/tmp/.config/huggingface:ro" \
+  -v "$PWD/dataset:/workspace/SymTRELLIS/dataset:ro" \
+  -v "$PWD/trainer:/workspace/SymTRELLIS/trainer:ro" \
+  -v "$DATASET_ROOT:/data:ro" \
+  -v "$TRAIN_OUTPUT_DIR:/output" \
+  -w /workspace/SymTRELLIS \
+  ghcr.io/symtrellis/symtrellis:dev-torch2.9.0-cu130-py312 \
+  bash -lc '
+    mkdir -p "$HOME"
+
+    PYTHONPATH=/workspace/SymTRELLIS \
+    torchrun --standalone --nproc_per_node=1 trainer/train.py \
+      --task trellis2_sparse_structure \
+      --train-data-dir /data/objaversexl_sketchfab/trellis2/multi_slats/ss_enc_conv3d_16l8_fp16_sslatentres_16_occres_64_s1_r16_p4 \
+      --eval-data-dir /data/toys4k/trellis2/multi_slats/ss_enc_conv3d_16l8_fp16_sslatentres_16_occres_64_s1_r16_p4 \
+      --grid-size 16 \
+      --latent-dim 8 \
+      --num-scale 1 \
+      --num-rots 16 \
+      --num-perts 4 \
+      --model-backend '"$MODEL_BACKEND"' \
+      --attention-backend xformers \
+      --model-scale base \
+      --lowrank-rank 64 \
+      --dst-input-norm-threshold 1.5 \
+      --decoded-loss-weight 0.0 \
+      --batch-size 8 \
+      --accumulation-steps 32 \
+      --steps-per-epoch 250 \
+      --epochs 100 \
+      --lr-scheduler one_cycle \
+      --lr 1e-3 \
+      --weight-decay 1e-2 \
+      --log-interval 5 \
+      --max-eval-batches 100 \
+      --log-dir /output/tensorboard \
+      --checkpoint-dir /output/checkpoints \
+      2>&1 | tee /output/train.log
+  '
+```
+
+This configuration uses a minibatch size of 8 and 32 accumulation steps, giving an effective batch size of 256.
+
+### Shape Mapper Pretraining
+
+The shape mapper uses the same Docker environment and cache layout, but has its own dataset format and model dimensions.
+
+```bash
+MODEL_BACKEND="neighbor_graph"
+DATASET_ROOT="<dataset-root>"
+TRAIN_OUTPUT_DIR="<training-output-dir>"
+
+mkdir -p \
+  "$TRAIN_OUTPUT_DIR" \
+  "$HOME/.cache/cuda_compute_cache" \
+  "$HOME/.cache/triton" \
+  "$HOME/.cache/huggingface" \
+  "$HOME/.config/huggingface"
+
+docker run --rm --gpus all --ipc=host \
+  --user "$(id -u):$(id -g)" \
+  -e PYTHONUNBUFFERED=1 \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e PYTORCH_ALLOC_CONF=expandable_segments:True \
+  -e CUDA_CACHE_PATH=/cuda-cache \
+  -e CUDA_CACHE_MAXSIZE=2147483648 \
+  -e TRITON_CACHE_DIR=/triton-cache \
+  -e HF_HOME=/hf-cache \
+  -e HF_HUB_CACHE=/hf-cache/hub \
+  -e XDG_CONFIG_HOME=/tmp/.config \
+  -e HOME=/tmp/user-home \
+  -v "$HOME/.cache/cuda_compute_cache:/cuda-cache" \
+  -v "$HOME/.cache/triton:/triton-cache" \
+  -v "$HOME/.cache/huggingface:/hf-cache" \
+  -v "$HOME/.config/huggingface:/tmp/.config/huggingface:ro" \
+  -v "$PWD/dataset:/workspace/SymTRELLIS/dataset:ro" \
+  -v "$PWD/trainer:/workspace/SymTRELLIS/trainer:ro" \
+  -v "$DATASET_ROOT:/data:ro" \
+  -v "$TRAIN_OUTPUT_DIR:/output" \
+  -w /workspace/SymTRELLIS \
+  ghcr.io/symtrellis/symtrellis:dev-torch2.9.0-cu130-py312 \
+  bash -lc '
+    mkdir -p "$HOME"
+
+    PYTHONPATH=/workspace/SymTRELLIS \
+    torchrun --standalone --nproc_per_node=1 trainer/train.py \
+      --task trellis2_shape \
+      --train-data-dir /data/objaversexl_sketchfab/trellis2/multi_slats/shape_enc_next_dc_f16c32_fp16_shapelatentres_32_ovoxres_512_s3_r6_p3 \
+      --eval-data-dir /data/toys4k/trellis2/multi_slats/shape_enc_next_dc_f16c32_fp16_shapelatentres_32_ovoxres_512_s3_r6_p3 \
+      --grid-size 32 \
+      --latent-dim 32 \
+      --num-scale 3 \
+      --num-rots 6 \
+      --num-perts 3 \
+      --model-backend '"$MODEL_BACKEND"' \
+      --attention-backend xformers \
+      --model-scale base \
+      --lowrank-rank 256 \
+      --decoded-output-weight 0.0 \
+      --decoded-subdivision-weight 0.0 \
+      --batch-size 16 \
+      --accumulation-steps 16 \
+      --steps-per-epoch 250 \
+      --epochs 100 \
+      --lr-scheduler one_cycle \
+      --lr 1e-3 \
+      --weight-decay 1e-2 \
+      --log-interval 5 \
+      --max-eval-batches 100 \
+      --log-dir /output/tensorboard \
+      --checkpoint-dir /output/checkpoints \
+      2>&1 | tee /output/train.log
+  '
+```
+
+This configuration uses a minibatch size of 16 and 16 accumulation steps, also giving an effective batch size of 256.
 
 ## BibTeX
 

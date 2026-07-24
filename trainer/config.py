@@ -34,6 +34,7 @@ class TrainConfig:
     steps_per_epoch: int = 250
     epochs: int = 100
     lr: float = 1e-3
+    lr_scheduler: Literal["one_cycle", "constant"] = "one_cycle"
     weight_decay: float = 1e-2
     accumulation_steps: int = 16
     amp: bool = False

@@ -79,7 +79,7 @@ class Trainer:
         self.model: torch.nn.Module
         self.ddp_model: DDP
         self.optimizer: torch.optim.Optimizer
-        self.scheduler: torch.optim.lr_scheduler.OneCycleLR
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler | None
         self.scaler: GradScaler
         self.writer: SummaryWriter | None = None
         self.coord_shift_generator = torch.Generator()
@@ -132,12 +132,14 @@ class Trainer:
         self.scaler = GradScaler(enabled=self.config.amp)
         self.writer = SummaryWriter(self.config.log_dir) if self.rank == 0 and self.config.log_dir else None
 
-        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            self.optimizer,
-            max_lr=self.config.lr,
-            epochs=self.config.epochs,
-            steps_per_epoch=self.config.steps_per_epoch,
-        )
+        self.scheduler = None
+        if self.config.lr_scheduler == "one_cycle":
+            self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                self.optimizer,
+                max_lr=self.config.lr,
+                epochs=self.config.epochs,
+                steps_per_epoch=self.config.steps_per_epoch,
+            )
 
         self.load_resume_checkpoint()
         self.print_memory_start()
@@ -183,7 +185,8 @@ class Trainer:
         checkpoint = torch.load(self.config.resume_checkpoint_path, map_location="cpu")
         self.ddp_model.module.load_state_dict(checkpoint["model"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
-        self.scheduler.load_state_dict(checkpoint["scheduler"])
+        if self.scheduler is not None:
+            self.scheduler.load_state_dict(checkpoint["scheduler"])
         self.scaler.load_state_dict(checkpoint["scaler"])
         self.start_epoch = int(checkpoint["epoch"]) + 1
         self.global_step = int(checkpoint["global_step"])
@@ -252,7 +255,8 @@ class Trainer:
             self.scaler.step(self.optimizer)
             self.scaler.update()
             self.optimizer.zero_grad(set_to_none=True)
-            self.scheduler.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
             self.update_step += 1
 
             metrics_log = self.reduce_metrics(accumulated_metric_sums, accumulated_metric_counts)
@@ -416,7 +420,7 @@ class Trainer:
                 "epoch": epoch,
                 "model": self.ddp_model.module.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
-                "scheduler": self.scheduler.state_dict(),
+                "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
                 "scaler": self.scaler.state_dict(),
                 "global_step": self.global_step,
                 "update_step": self.update_step,

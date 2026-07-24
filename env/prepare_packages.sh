@@ -32,6 +32,7 @@ readonly -a NATIVE_PACKAGES=(
     pytorch3d
     kaolin
     gsplat
+    diff-gaussian-rasterization
     nvdiffrast
     nvdiffrec-render
     diffoctreerast
@@ -54,6 +55,7 @@ readonly SAM3D_OBJECTS_REPOSITORY="facebookresearch/sam-3d-objects"
 readonly PYTORCH3D_REPOSITORY="facebookresearch/pytorch3d"
 readonly KAOLIN_REPOSITORY="NVIDIAGameWorks/kaolin"
 readonly GSPLAT_REPOSITORY="nerfstudio-project/gsplat"
+readonly MIP_SPLATTING_REPOSITORY="autonomousvision/mip-splatting"
 readonly NVDIFFRAST_REPOSITORY="NVlabs/nvdiffrast"
 readonly NVDIFFREC_REPOSITORY="JeffreyXiang/nvdiffrec"
 readonly DIFFOCTREERAST_REPOSITORY="JeffreyXiang/diffoctreerast"
@@ -69,6 +71,7 @@ readonly DEFAULT_SAM3D_OBJECTS_COMMIT="f91db411c50efee93d8db7aeb323885650f6f722"
 readonly DEFAULT_PYTORCH3D_COMMIT="f5f6b78e70e0a1b70f3be9a09b5b001e9b3a7a03"
 readonly DEFAULT_GSPLAT_COMMIT="2323de5905d5e90e035f792fe65bad0fedd413e7"
 readonly DEFAULT_KAOLIN_REF="ad43ffd3ed9bb11fb4acc29e5b848712cdb53ce1"
+readonly DEFAULT_MIP_SPLATTING_REF="dda02ab5ecf45d6edb8c540d9bb65c7e451345a9"
 readonly DEFAULT_NVDIFFRAST_REF="v0.4.0"
 readonly DEFAULT_NVDIFFREC_REF="b296927cc7fd01c2ac1087c8065c4d7248f72da4"
 readonly DEFAULT_DIFFOCTREERAST_REF="b09c20b84ec3aace4729e6e18a613112320eca3a"
@@ -222,6 +225,7 @@ SAM3D_OBJECTS_COMMIT="${SAM3D_OBJECTS_COMMIT:-${DEFAULT_SAM3D_OBJECTS_COMMIT}}"
 PYTORCH3D_COMMIT="${PYTORCH3D_COMMIT:-${DEFAULT_PYTORCH3D_COMMIT}}"
 GSPLAT_COMMIT="${GSPLAT_COMMIT:-${DEFAULT_GSPLAT_COMMIT}}"
 KAOLIN_REF="${KAOLIN_REF:-${DEFAULT_KAOLIN_REF}}"
+MIP_SPLATTING_REF="${MIP_SPLATTING_REF:-${DEFAULT_MIP_SPLATTING_REF}}"
 NVDIFFRAST_REF="${NVDIFFRAST_REF:-${DEFAULT_NVDIFFRAST_REF}}"
 NVDIFFREC_REF="${NVDIFFREC_REF:-${DEFAULT_NVDIFFREC_REF}}"
 DIFFOCTREERAST_REF="${DIFFOCTREERAST_REF:-${DEFAULT_DIFFOCTREERAST_REF}}"
@@ -724,6 +728,10 @@ git -C "${CONTAINER_BUILD_DIR}/trellis" \
 git -C "${CONTAINER_BUILD_DIR}/trellis" \
     submodule update --init --recursive
 
+sed -i \
+    '/^from \. import pipelines$/d' \
+    "${CONTAINER_BUILD_DIR}/trellis/trellis/__init__.py"
+
 cat > "${CONTAINER_BUILD_DIR}/trellis/pyproject.toml" <<'TRELLIS_PYPROJECT'
 [build-system]
 requires = ["setuptools>=61", "wheel"]
@@ -938,6 +946,24 @@ python -m build \
 EOF
 }
 
+# Emit the diff-gaussian-rasterization source preparation and wheel build commands.
+emit_diff_gaussian_rasterization_commands() {
+    cat <<EOF
+git clone \
+    "https://github.com/${MIP_SPLATTING_REPOSITORY}.git" \
+    "${CONTAINER_BUILD_DIR}/mip-splatting"
+git -C "${CONTAINER_BUILD_DIR}/mip-splatting" \
+    checkout --detach "${MIP_SPLATTING_REF}"
+
+python -m build \
+    --wheel \
+    --no-isolation \
+    --outdir "${CONTAINER_WHEELS_DIR}" \
+    "${CONTAINER_BUILD_DIR}/mip-splatting/submodules/diff-gaussian-rasterization"
+
+EOF
+}
+
 # Emit the nvdiffrast source preparation and wheel build commands.
 emit_nvdiffrast_commands() {
     cat <<EOF
@@ -1103,6 +1129,7 @@ emit_selected_packages() {
         pytorch3d) emit_pytorch3d_commands ;;
         kaolin) emit_kaolin_commands ;;
         gsplat) emit_gsplat_commands ;;
+        diff-gaussian-rasterization) emit_diff_gaussian_rasterization_commands ;;
         nvdiffrast) emit_nvdiffrast_commands ;;
         nvdiffrec-render) emit_nvdiffrec_render_commands ;;
         diffoctreerast) emit_diffoctreerast_commands ;;
