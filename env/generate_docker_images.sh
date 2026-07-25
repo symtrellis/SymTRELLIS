@@ -294,6 +294,8 @@ COPY --from=webui backend/loaders/*.py /app/webui/backend/loaders/
 COPY --from=webui backend/operations/*.py /app/webui/backend/operations/
 COPY --from=webui frontend/dist /app/webui/frontend/dist
 
+RUN chmod -R a+rX /app/inference /app/webui
+
 ENV PYTHONPATH=/app:/app/webui \
     GRADIO_SERVER_NAME=0.0.0.0 \
     GRADIO_SERVER_PORT=7860
