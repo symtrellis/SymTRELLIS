@@ -50,14 +50,18 @@ mkdir -p \
 docker run --rm --gpus all                                          \
   --user "$(id -u):$(id -g)"                                        \
   -p 7860:7860                                                      \
+  -e HOME=/tmp                                                      \
+  -e USER="$(id -un)"                                               \
+  -e LOGNAME="$(id -un)"                                            \
+  -e XDG_CONFIG_HOME=/config                                        \
   -e SYMTRELLIS_WEBUI_SESSION_TIMEOUT_SECONDS=315360000             \
   -e SYMTRELLIS_WEBUI_CLEANUP_INTERVAL_SECONDS=300                  \
-  -e HF_HOME=/root/.cache/huggingface                               \
-  -e HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub             \
-  -e TRITON_CACHE_DIR=/root/.cache/triton                           \
-  -v "$HOME/.cache/huggingface:/root/.cache/huggingface"            \
-  -v "$HOME/.config/huggingface:/root/.config/huggingface:ro"       \
-  -v "$HOME/.cache/triton:/root/.cache/triton"                      \
+  -e HF_HOME=/cache/huggingface                                     \
+  -e HF_HUB_CACHE=/cache/huggingface/hub                            \
+  -e TRITON_CACHE_DIR=/cache/triton                                 \
+  -v "$HOME/.cache/huggingface:/cache/huggingface"                  \
+  -v "$HOME/.config/huggingface:/config/huggingface:ro"             \
+  -v "$HOME/.cache/triton:/cache/triton"                            \
   ghcr.io/symtrellis/symtrellis:inference-"$ENV_TAG"
 ```
 
