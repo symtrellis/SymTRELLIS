@@ -48,6 +48,7 @@ mkdir -p \
   "$HOME/.cache/triton"
 
 docker run --rm --gpus all                                          \
+  --user "$(id -u):$(id -g)"                                        \
   -p 7860:7860                                                      \
   -e SYMTRELLIS_WEBUI_SESSION_TIMEOUT_SECONDS=315360000             \
   -e SYMTRELLIS_WEBUI_CLEANUP_INTERVAL_SECONDS=300                  \
