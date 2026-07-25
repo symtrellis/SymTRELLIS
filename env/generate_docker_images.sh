@@ -5,6 +5,8 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly WHEELS_ROOT="${REPO_DIR}/wheels"
 readonly LOCAL_INDEX_PORT=18080
+readonly BLENDER_VERSION="5.1.2"
+readonly BLENDER_SERIES="5.1"
 
 readonly -a COMMON_APT_PACKAGES=(
     ca-certificates
@@ -66,6 +68,8 @@ readonly -a COMMON_PIP_PACKAGES=(
 )
 
 readonly -a DEV_APT_PACKAGES=(
+    curl
+    xz-utils
     libgl1
     libegl1
     libglib2.0-0
@@ -73,6 +77,9 @@ readonly -a DEV_APT_PACKAGES=(
     libgomp1
     libx11-6
     libxext6
+    libxfixes3
+    libxi6
+    libxkbcommon0
     libxrender1
     libsm6
 )
@@ -279,6 +286,12 @@ RUN python -m pip install --no-cache-dir \\
 
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends ${DEV_APT_PACKAGES[*]} \\
+ && curl -fsSL \\
+    "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \\
+    -o /tmp/blender.tar.xz \\
+ && tar -xJf /tmp/blender.tar.xz -C /opt \\
+ && ln -sf "/opt/blender-${BLENDER_VERSION}-linux-x64/blender" /usr/local/bin/blender \\
+ && rm -f /tmp/blender.tar.xz \\
  && rm -rf /var/lib/apt/lists/*
 EOF
 }

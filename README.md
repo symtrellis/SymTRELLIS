@@ -89,6 +89,8 @@ mkdir -p \
 
 docker run --rm --gpus all --ipc=host \
   --user "$(id -u):$(id -g)" \
+  -e USER="$(id -un)" \
+  -e LOGNAME="$(id -un)" \
   -e PYTHONUNBUFFERED=1 \
   -e PYTHONDONTWRITEBYTECODE=1 \
   -e PYTORCH_ALLOC_CONF=expandable_segments:True \
@@ -163,6 +165,8 @@ mkdir -p \
 
 docker run --rm --gpus all --ipc=host \
   --user "$(id -u):$(id -g)" \
+  -e USER="$(id -un)" \
+  -e LOGNAME="$(id -un)" \
   -e PYTHONUNBUFFERED=1 \
   -e PYTHONDONTWRITEBYTECODE=1 \
   -e PYTORCH_ALLOC_CONF=expandable_segments:True \
