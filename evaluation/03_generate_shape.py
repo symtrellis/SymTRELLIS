@@ -249,7 +249,6 @@ def main() -> None:
 
     workspace = Workspace(args.workspace_dir)
     mapper_tag = args.mapper_path.strip("/").replace("/", "_")
-    condition_tag = args.condition_folder.strip("/").replace("/", "_")
     sparse_structure_tag = args.sparse_structure_folder.strip("/").replace("/", "_")
     symmetry_tag = args.symmetry_annotation_folder.strip("/").replace("/", "_") if args.symmetry_annotation_folder else "gt"
     experiment_name = "_".join(
@@ -260,7 +259,6 @@ def main() -> None:
             f"guidance_strength_{args.guidance_strength}",
             f"guidance_duration_{args.guidance_duration}",
             f"mapper_{mapper_tag}",
-            f"condition_{condition_tag}",
             f"sparse_structure_{sparse_structure_tag}",
             f"symmetry_{symmetry_tag}",
         ]
