@@ -25,14 +25,14 @@ def sector_replication(
     major_axis,
     transforms,
     translations,
-    signs,
+    reflection,
     phase_samples,
 ):
     axis = major_axis / major_axis.norm().clamp_min(1e-12)
     triangles = vertices[faces]
     face_area = 0.5 * torch.linalg.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]).norm(dim=-1)
 
-    if signs.sum().item() < transforms.shape[0]:
+    if reflection:
         vertex_sector = (((vertices - center) * axis).sum(dim=-1) >= 0).long()
         face_sector_vertices = vertex_sector[faces]
         face_sector = face_sector_vertices[:, 0]
@@ -104,14 +104,12 @@ def sector_replication(
 
     vertex_copies = []
     face_copies = []
-    for group_index, (transform, translation, sign) in enumerate(zip(transforms, translations, signs)):
+    for group_index, (transform, translation) in enumerate(zip(transforms, translations)):
         vertex_copies.append(selected_vertices @ transform.T + translation)
-        copy_faces = selected_faces if sign.item() else selected_faces[:, [0, 2, 1]]
+        copy_faces = selected_faces[:, [0, 2, 1]] if reflection and group_index else selected_faces
         face_copies.append(copy_faces + group_index * selected_vertices.shape[0])
 
-    output_vertices = torch.cat(vertex_copies).cpu().numpy()
-    output_faces = torch.cat(face_copies).cpu().numpy()
-    return output_vertices, output_faces
+    return torch.cat(vertex_copies).cpu().numpy(), torch.cat(face_copies).cpu().numpy()
 
 
 def voxel_occupancy_majority(
@@ -221,9 +219,7 @@ def postprocess_mesh(
     voxel_slab_depth,
     closest_point_iterations,
     input_files,
-    sector_files,
-    voxel_files,
-    closest_files,
+    output_files,
 ):
     mesh = trimesh.load(
         input_files.path(".glb", shape_id=shape_id, view_id=view_id),
@@ -249,8 +245,9 @@ def postprocess_mesh(
         minor_axis=minor_axis,
         include_identity=True,
     )
-    sector_label = "S1" if symmetry_label == "S1" else f"C{symmetry_fold}"
-    sector_transforms, sector_translations, sector_signs = get_3d_point_group(
+    reflection = symmetry_label == "S1"
+    sector_label = "S1" if reflection else f"C{symmetry_fold}"
+    sector_transforms, sector_translations, _ = get_3d_point_group(
         label=sector_label,
         center=center,
         major_axis=major_axis,
@@ -258,58 +255,41 @@ def postprocess_mesh(
         include_identity=True,
     )
 
-    sector_mesh = sector_replication(
-        vertices=vertices,
-        faces=faces,
-        center=center,
-        major_axis=major_axis,
-        transforms=sector_transforms,
-        translations=sector_translations,
-        signs=sector_signs,
-        phase_samples=sector_phase_samples,
-    )
-    voxel_mesh = voxel_occupancy_majority(
-        vertices=vertices,
-        faces=faces,
-        transforms=transforms,
-        translations=translations,
-        resolution=voxel_resolution,
-        bbox_padding=bbox_padding,
-        slab_depth=voxel_slab_depth,
-    )
-    closest_mesh = closest_point_orbit_average(
-        vertices=vertices,
-        faces=faces,
-        transforms=transforms,
-        translations=translations,
-        iterations=closest_point_iterations,
-    )
-
-    outputs = [
-        (
-            sector_mesh,
-            sector_files.path(".glb", shape_id=shape_id, view_id=view_id),
+    outputs = {
+        "sector_replication": sector_replication(
+            vertices=vertices,
+            faces=faces,
+            center=center,
+            major_axis=major_axis,
+            transforms=sector_transforms,
+            translations=sector_translations,
+            reflection=reflection,
+            phase_samples=sector_phase_samples,
         ),
-        (
-            voxel_mesh,
-            voxel_files.path(".glb", shape_id=shape_id, view_id=view_id),
+        "voxel_majority": voxel_occupancy_majority(
+            vertices=vertices,
+            faces=faces,
+            transforms=transforms,
+            translations=translations,
+            resolution=voxel_resolution,
+            bbox_padding=bbox_padding,
+            slab_depth=voxel_slab_depth,
         ),
-        (
-            closest_mesh,
-            closest_files.path(".glb", shape_id=shape_id, view_id=view_id),
+        "closest_point_average": closest_point_orbit_average(
+            vertices=vertices,
+            faces=faces,
+            transforms=transforms,
+            translations=translations,
+            iterations=closest_point_iterations,
         ),
-    ]
-    for (output_vertices, output_faces), output_path in outputs:
+    }
+    for method, (output_vertices, output_faces) in outputs.items():
         glb_vertices = output_vertices[:, [0, 2, 1]].copy()
         glb_vertices[:, 2] *= -1
+        output_path = output_files[method].path(".glb", shape_id=shape_id, view_id=view_id)
         trimesh.Trimesh(vertices=glb_vertices, faces=output_faces, process=False).export(output_path)
 
-    return {
-        "idx": idx,
-        sector_files.rel_path: True,
-        voxel_files.rel_path: True,
-        closest_files.rel_path: True,
-    }
+    return {"idx": idx, **{files.rel_path: True for files in output_files.values()}}
 
 
 def main():
@@ -333,13 +313,13 @@ def main():
     experiment_name = f"postprocess_{shape_tag}_symmetry_{symmetry_tag}"
 
     input_files = workspace.files(args.shape_folder)
-    sector_files = workspace.files(f"experiments/{experiment_name}/sector_replication")
-    voxel_files = workspace.files(f"experiments/{experiment_name}/voxel_majority")
-    closest_files = workspace.files(f"experiments/{experiment_name}/closest_point_average")
-    sector_files.mkdir()
-    voxel_files.mkdir()
-    closest_files.mkdir()
-    output_files = (sector_files, voxel_files, closest_files)
+    output_files = {
+        "sector_replication": workspace.files(f"experiments/{experiment_name}/sector_replication"),
+        "voxel_majority": workspace.files(f"experiments/{experiment_name}/voxel_majority"),
+        "closest_point_average": workspace.files(f"experiments/{experiment_name}/closest_point_average"),
+    }
+    for files in output_files.values():
+        files.mkdir()
 
     prediction_files = None
     if args.symmetry_prediction_folder:
@@ -348,7 +328,7 @@ def main():
     metadata = workspace.read_metadata().sort_values("idx")
     metadata = metadata.loc[[input_files.path(".glb", shape_id=row["shape_id"], view_id=row["view_id"]).is_file() for _, row in metadata.iterrows()]]
     if not args.recompute_finished:
-        metadata = metadata.loc[[not all(files.path(".glb", shape_id=row["shape_id"], view_id=row["view_id"]).is_file() for files in output_files) for _, row in metadata.iterrows()]]
+        metadata = metadata.loc[[not all(files.path(".glb", shape_id=row["shape_id"], view_id=row["view_id"]).is_file() for files in output_files.values()) for _, row in metadata.iterrows()]]
 
     start = len(metadata) * args.rank // args.world_size
     end = len(metadata) * (args.rank + 1) // args.world_size
@@ -403,9 +383,7 @@ def main():
             },
             resources={
                 "input_files": input_files,
-                "sector_files": sector_files,
-                "voxel_files": voxel_files,
-                "closest_files": closest_files,
+                "output_files": output_files,
             },
         )
     ]
@@ -413,12 +391,7 @@ def main():
 
     records = pd.DataFrame(
         results,
-        columns=[
-            "idx",
-            sector_files.rel_path,
-            voxel_files.rel_path,
-            closest_files.rel_path,
-        ],
+        columns=["idx", *(files.rel_path for files in output_files.values())],
     )
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     record_path = workspace.path(f"unmerged_records/07_symmetry_postprocess_{timestamp}_rank{args.rank}.csv")
