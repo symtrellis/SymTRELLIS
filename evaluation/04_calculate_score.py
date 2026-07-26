@@ -170,12 +170,14 @@ def calculate_score(
     ground_truth_files,
     output_files,
 ):
+    fallback_fold = 1 if symmetry_group == "S1" else max_fold
     result = {
         "eval_success": False,
         "fail_reason": "",
-        "pred_fold": None,
-        "pred_axis": None,
-        "pred_center": None,
+        "pred_fold": fallback_fold,
+        "pred_major_axis": [0.0, 0.0, 1.0],
+        "pred_minor_axis": [1.0, 0.0, 0.0],
+        "pred_center": [0.0, 0.0, 0.0],
         "rot_axes": [],
         "refl_planes": [],
         "self_symm_result": {
@@ -222,7 +224,7 @@ def calculate_score(
         alignment = abs(np.dot(aligned_candidate["axis"], major_axis))
         selected_candidate = aligned_candidate if alignment > AXIS_ALIGN_THRESHOLD else min(rotation_candidates, key=lambda candidate: candidate["rmse"])
         pred_fold = symmetry_fold if selected_candidate["fold_e"] % symmetry_fold == 0 or selected_candidate["fold_i"] % symmetry_fold == 0 else selected_candidate["fold_i"]
-        pred_axis = torch.tensor(selected_candidate["axis"], device=device, dtype=torch.float32)
+        pred_major_axis = torch.tensor(selected_candidate["axis"], device=device, dtype=torch.float32)
         pred_center = torch.tensor(selected_candidate["q"], device=device, dtype=torch.float32)
         symmetry_label = f"C{pred_fold}"
     else:
@@ -230,14 +232,21 @@ def calculate_score(
         alignment = abs(np.dot(aligned_candidate["n"], major_axis))
         selected_candidate = aligned_candidate if alignment > AXIS_ALIGN_THRESHOLD else min(reflection_candidates, key=lambda candidate: candidate["rmse"])
         pred_fold = 1
-        pred_axis = torch.tensor(selected_candidate["n"], device=device, dtype=torch.float32)
-        pred_center = selected_candidate["c"] * pred_axis
+        pred_major_axis = torch.tensor(selected_candidate["n"], device=device, dtype=torch.float32)
+        pred_center = selected_candidate["c"] * pred_major_axis
         symmetry_label = "S1"
+
+    major_direction = pred_major_axis / pred_major_axis.norm()
+    minor_index = (pred_major_axis.abs().argmax().item() + 1) % 3
+    pred_minor_axis = torch.zeros_like(pred_major_axis)
+    pred_minor_axis[minor_index] = 1.0
+    pred_minor_axis = pred_minor_axis - (pred_minor_axis * major_direction).sum() * major_direction
+    pred_minor_axis = pred_minor_axis / pred_minor_axis.norm()
 
     transforms, translations, _ = get_3d_point_group(
         label=symmetry_label,
         center=pred_center,
-        major_axis=pred_axis,
+        major_axis=pred_major_axis,
         minor_axis=None,
         include_identity=False,
     )
@@ -319,7 +328,8 @@ def calculate_score(
         {
             "eval_success": True,
             "pred_fold": pred_fold,
-            "pred_axis": pred_axis.tolist(),
+            "pred_major_axis": pred_major_axis.tolist(),
+            "pred_minor_axis": pred_minor_axis.tolist(),
             "pred_center": pred_center.tolist(),
             "self_symm_result": self_symmetry_result,
             "reconstruction_result": {"cd_recon": (0.5 * (gt_to_prediction.mean() + prediction_to_gt.mean())).item()},

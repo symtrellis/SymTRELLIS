@@ -191,7 +191,7 @@ def main() -> None:
     parser.add_argument("--workspace-dir", required=True)
     parser.add_argument("--condition-folder", default="conditions")
     parser.add_argument("--mapper-path", required=True)
-    parser.add_argument("--symmetry-annotation-folder")
+    parser.add_argument("--symmetry-prediction-folder")
     parser.add_argument("--noise-strength", type=float, default=0.2)
     parser.add_argument("--guidance-strength", type=float, default=1.0)
     parser.add_argument("--guidance-duration", type=float, default=0.3)
@@ -207,7 +207,7 @@ def main() -> None:
 
     workspace = Workspace(args.workspace_dir)
     mapper_tag = args.mapper_path.strip("/").replace("/", "_")
-    symmetry_tag = args.symmetry_annotation_folder.strip("/").replace("/", "_") if args.symmetry_annotation_folder else "gt"
+    symmetry_tag = args.symmetry_prediction_folder.strip("/").replace("/", "_") if args.symmetry_prediction_folder else "gt"
     retry_tag = f"retry_{args.max_retry}_threshold_{args.voxel_count_threshold}" if args.allow_retry else "no_retry"
 
     experiment_name = "_".join(
@@ -226,9 +226,9 @@ def main() -> None:
     output_files = workspace.files(f"experiments/{experiment_name}")
     output_files.mkdir()
 
-    annotation_files = None
-    if args.symmetry_annotation_folder:
-        annotation_files = workspace.files(args.symmetry_annotation_folder)
+    prediction_files = None
+    if args.symmetry_prediction_folder:
+        prediction_files = workspace.files(args.symmetry_prediction_folder)
 
     metadata = workspace.read_metadata().sort_values("idx")
     if not args.recompute_finished:
@@ -278,16 +278,16 @@ def main() -> None:
     for _, row in selected.iterrows():
         shape_id = row["shape_id"]
         view_id = row["view_id"]
+        shape_label = workspace.shape_labels[shape_id]
 
-        if annotation_files is not None:
-            with annotation_files.path(".json", shape_id=shape_id, view_id=view_id).open(encoding="utf-8") as file:
-                annotation = json.load(file)
-            symmetry_label = annotation["symm_type"][0].upper() + annotation["symm_type"][1:]
-            symmetry_center = annotation["center"]
-            major_axis = annotation["major_axis"]
-            minor_axis = annotation["minor_axis"]
+        if prediction_files is not None:
+            with prediction_files.path(".json", shape_id=shape_id, view_id=view_id).open(encoding="utf-8") as file:
+                prediction = json.load(file)
+            symmetry_label = "S1" if shape_label["symmetry_group"] == "S1" else f"C{prediction['pred_fold']}"
+            symmetry_center = prediction["pred_center"]
+            major_axis = prediction["pred_major_axis"]
+            minor_axis = prediction["pred_minor_axis"]
         else:
-            shape_label = workspace.shape_labels[shape_id]
             symmetry_label = shape_label["symmetry_group"]
             symmetry_center = [0.0, 0.0, 0.0]
             major_axis = AXIS_VECTORS[shape_label["major_axis"]]
