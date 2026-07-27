@@ -205,7 +205,7 @@ def saver(
     return {
         "sha256": sha256,
         MESH_REL_PATH: mesh_files.exists(sha256),
-        shape_latent_files.rel_path: shape_latent_files.exists(sha256),
+        shape_latent_files.rel_path: True,
     }
 
 
@@ -254,13 +254,17 @@ def main() -> None:
     shape_latent_files.mkdir()
 
     metadata = workspace.read_metadata()
-    sha256s = [str(value) for value in metadata["sha256"]]
+    if shape_latent_files.rel_path not in metadata.columns:
+        metadata[shape_latent_files.rel_path] = False
+
+    ready = metadata[mesh_files.rel_path].eq(True)
     if not args.recompute_finished:
-        sha256s = [sha256 for sha256 in sha256s if not shape_latent_files.exists(sha256)]
+        ready &= ~metadata[shape_latent_files.rel_path].eq(True)
+    sha256s = metadata.loc[ready, "sha256"].astype(str)
 
     start = len(sha256s) * args.rank // args.world_size
     end = len(sha256s) * (args.rank + 1) // args.world_size
-    inputs = [{"sha256": sha256} for sha256 in sha256s[start:end]]
+    inputs = [{"sha256": sha256} for sha256 in sha256s.iloc[start:end]]
 
     stages = [
         Stage(

@@ -82,8 +82,11 @@ def main():
     output_files.mkdir()
 
     metadata = workspace.read_metadata().sort_values("idx")
+    if output_files.rel_path not in metadata.columns:
+        metadata[output_files.rel_path] = False
+
     if not args.recompute_finished:
-        metadata = metadata.loc[[not output_files.exists(shape_id=row["shape_id"], view_id=row["view_id"]) for _, row in metadata.iterrows()]]
+        metadata = metadata.loc[~metadata[output_files.rel_path].eq(True)]
 
     start = len(metadata) * args.rank // args.world_size
     end = len(metadata) * (args.rank + 1) // args.world_size

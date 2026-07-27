@@ -192,7 +192,13 @@ def calculate_score(
     }
 
     prediction_path = prediction_files.path(".glb", shape_id=shape_id, view_id=view_id)
+    prediction_fail_path = prediction_files.path(".fail", shape_id=shape_id, view_id=view_id)
     output_path = output_files.path(".json", shape_id=shape_id, view_id=view_id)
+    if prediction_fail_path.is_file():
+        result["fail_reason"] = prediction_fail_path.read_text(encoding="utf-8").strip()
+        output_path.write_text(json.dumps(result, indent=4), encoding="utf-8")
+        return {"idx": idx, output_files.rel_path: True}
+
     if not prediction_path.is_file():
         result["fail_reason"] = "no prediction mesh"
         output_path.write_text(json.dumps(result, indent=4), encoding="utf-8")
@@ -368,9 +374,11 @@ def main():
     output_files.mkdir()
 
     metadata = workspace.read_metadata().sort_values("idx")
-    metadata = metadata.loc[metadata[args.shape_folder]]
+    if output_files.rel_path not in metadata.columns:
+        metadata[output_files.rel_path] = False
+
     if not args.recompute_finished:
-        metadata = metadata.loc[[not output_files.exists(shape_id=row["shape_id"], view_id=row["view_id"]) for _, row in metadata.iterrows()]]
+        metadata = metadata.loc[~metadata[output_files.rel_path].eq(True)]
 
     start = len(metadata) * args.rank // args.world_size
     end = len(metadata) * (args.rank + 1) // args.world_size

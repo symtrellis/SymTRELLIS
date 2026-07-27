@@ -46,7 +46,7 @@ def dump_mesh(
         copy2(temporary, staged)
         staged.replace(destination)
 
-    return {"sha256": sha256, MESH_REL_PATH: mesh_files.exists(sha256)}
+    return {"sha256": sha256, MESH_REL_PATH: True}
 
 
 def main() -> None:
@@ -66,15 +66,20 @@ def main() -> None:
     blender_path = install_blender()
 
     metadata = workspace.read_metadata()
-    sha256s = metadata["sha256"].astype(str)
+    if mesh_files.rel_path not in metadata.columns:
+        metadata[mesh_files.rel_path] = False
+
+    ready = metadata[raw_files.rel_path].eq(True)
     if not args.recompute_finished:
-        sha256s = sha256s[~sha256s.map(mesh_files.exists)]
+        ready &= ~metadata[mesh_files.rel_path].eq(True)
+    sha256s = metadata.loc[ready, "sha256"].astype(str)
 
     start = len(sha256s) * args.rank // args.world_size
     end = len(sha256s) * (args.rank + 1) // args.world_size
+    selected = sha256s.iloc[start:end]
 
     inputs = []
-    for value in sha256s.iloc[start:end]:
+    for value in selected:
         sha256 = str(value)
         raw_path = raw_files.find(sha256)
         if raw_path is None:

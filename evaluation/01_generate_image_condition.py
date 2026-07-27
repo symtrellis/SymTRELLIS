@@ -48,7 +48,7 @@ def save_condition(
     destination = condition_files.path(".npz", shape_id=shape_id, view_id=view_id)
     np.savez_compressed(destination, cond=condition.numpy())
 
-    return {"condition": None, condition_files.rel_path: condition_files.exists(shape_id=shape_id, view_id=view_id)}
+    return {"condition": None, condition_files.rel_path: True}
 
 
 def main() -> None:
@@ -69,9 +69,11 @@ def main() -> None:
     condition_files.mkdir()
 
     metadata = workspace.read_metadata().sort_values("idx")
+    if condition_files.rel_path not in metadata.columns:
+        metadata[condition_files.rel_path] = False
+
     if not args.recompute_finished:
-        finished = [condition_files.exists(shape_id=row["shape_id"], view_id=row["view_id"]) for _, row in metadata.iterrows()]
-        metadata = metadata.loc[[not value for value in finished]]
+        metadata = metadata.loc[~metadata[condition_files.rel_path].eq(True)]
 
     start = len(metadata) * args.rank // args.world_size
     end = len(metadata) * (args.rank + 1) // args.world_size

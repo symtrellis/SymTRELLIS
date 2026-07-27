@@ -25,10 +25,10 @@ def main() -> None:
     metadata = workspace.read_metadata()
     metadata["sha256"] = metadata["sha256"].astype(str)
 
-    raw_files = workspace.files("raw", "")
+    if "raw" not in metadata.columns:
+        metadata["raw"] = False
     if not args.recompute_finished:
-        pending = [raw_files.find(sha256) is None for sha256 in metadata["sha256"]]
-        metadata = metadata.loc[pending]
+        metadata = metadata.loc[~metadata["raw"].eq(True)]
 
     start = len(metadata) * args.rank // args.world_size
     end = len(metadata) * (args.rank + 1) // args.world_size

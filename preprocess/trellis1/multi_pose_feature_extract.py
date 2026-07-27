@@ -488,8 +488,8 @@ def saver(
 
     return {
         "sha256": sha256,
-        trellis1_latent_files.rel_path: trellis1_latent_files.exists(sha256),
-        sam3d_latent_files.rel_path: sam3d_latent_files.exists(sha256),
+        trellis1_latent_files.rel_path: True,
+        sam3d_latent_files.rel_path: True,
     }
 
 
@@ -578,10 +578,19 @@ def main() -> None:
     sam3d_latent_files.mkdir()
 
     metadata = workspace.read_metadata()
-    sha256s = metadata["sha256"].astype(str).drop_duplicates()
+    output_columns = [
+        trellis1_latent_files.rel_path,
+        sam3d_latent_files.rel_path,
+    ]
+    for column in output_columns:
+        if column not in metadata.columns:
+            metadata[column] = False
+
+    ready = metadata[shape_files.rel_path].eq(True) & metadata[render_files.rel_path].eq(True) & metadata[camera_files.rel_path].eq(True)
     if not args.recompute_finished:
-        finished = [trellis1_latent_files.exists(sha256) and sam3d_latent_files.exists(sha256) for sha256 in sha256s]
-        sha256s = sha256s[~pd.Series(finished, index=sha256s.index)]
+        completed = metadata[output_columns].eq(True).all(axis=1)
+        ready &= ~completed
+    sha256s = metadata.loc[ready, "sha256"].astype(str).drop_duplicates()
 
     start = len(sha256s) * args.rank // args.world_size
     end = len(sha256s) * (args.rank + 1) // args.world_size

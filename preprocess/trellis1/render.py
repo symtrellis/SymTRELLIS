@@ -132,9 +132,9 @@ def save(
 
         return {
             "sha256": sha256,
-            RENDER_REL_PATH: render_files.exists(sha256),
-            CAMERA_REL_PATH: camera_files.exists(sha256),
-            SHAPE_REL_PATH: shape_files.exists(sha256),
+            RENDER_REL_PATH: True,
+            CAMERA_REL_PATH: True,
+            SHAPE_REL_PATH: True,
         }
     finally:
         temporary.cleanup()
@@ -187,10 +187,20 @@ def main() -> None:
     shape_files.mkdir()
 
     metadata = workspace.read_metadata()
-    sha256s = metadata["sha256"].astype(str).drop_duplicates()
+    output_columns = [
+        render_files.rel_path,
+        camera_files.rel_path,
+        shape_files.rel_path,
+    ]
+    for column in output_columns:
+        if column not in metadata.columns:
+            metadata[column] = False
+
+    ready = metadata[raw_files.rel_path].eq(True)
     if not args.recompute_finished:
-        finished = [render_files.exists(sha256) and camera_files.exists(sha256) and shape_files.exists(sha256) for sha256 in sha256s]
-        sha256s = sha256s[~pd.Series(finished, index=sha256s.index)]
+        completed = metadata[output_columns].eq(True).all(axis=1)
+        ready &= ~completed
+    sha256s = metadata.loc[ready, "sha256"].astype(str).drop_duplicates()
 
     start = len(sha256s) * args.rank // args.world_size
     end = len(sha256s) * (args.rank + 1) // args.world_size

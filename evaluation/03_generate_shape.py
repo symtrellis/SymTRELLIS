@@ -74,13 +74,23 @@ def generate_shape(
     predictor: BaseFlowPredictor,
     solver: EulerSolver,
 ) -> dict[str, object]:
+    output_path = output_files.path(".glb", shape_id=shape_id, view_id=view_id)
+    fail_path = output_files.path(".fail", shape_id=shape_id, view_id=view_id)
+    sparse_structure_fail_path = sparse_structure_files.path(".fail", shape_id=shape_id, view_id=view_id)
+
+    if sparse_structure_fail_path.is_file():
+        if output_path.exists():
+            output_path.unlink()
+        fail_path.write_text(
+            sparse_structure_fail_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return {"idx": idx, output_files.rel_path: True}
+
     with np.load(condition_files.path(".npz", shape_id=shape_id, view_id=view_id)) as data:
         condition = torch.from_numpy(data["cond"])
     with np.load(sparse_structure_files.path(".npz", shape_id=shape_id, view_id=view_id)) as data:
         coords = torch.from_numpy(data["coords"])
-
-    output_path = output_files.path(".glb", shape_id=shape_id, view_id=view_id)
-    fail_path = output_files.path(".fail", shape_id=shape_id, view_id=view_id)
 
     if coords.numel() == 0:
         fail_path.write_text("Empty coordinates!\n", encoding="utf-8")
@@ -274,9 +284,11 @@ def main() -> None:
         prediction_files = workspace.files(args.symmetry_prediction_folder)
 
     metadata = workspace.read_metadata().sort_values("idx")
-    metadata = metadata.loc[[condition_files.path(".npz", shape_id=row["shape_id"], view_id=row["view_id"]).is_file() and sparse_structure_files.path(".npz", shape_id=row["shape_id"], view_id=row["view_id"]).is_file() for _, row in metadata.iterrows()]]
+    if output_files.rel_path not in metadata.columns:
+        metadata[output_files.rel_path] = False
+
     if not args.recompute_finished:
-        metadata = metadata.loc[[not output_files.exists(shape_id=row["shape_id"], view_id=row["view_id"]) for _, row in metadata.iterrows()]]
+        metadata = metadata.loc[~metadata[output_files.rel_path].eq(True)]
 
     start = len(metadata) * args.rank // args.world_size
     end = len(metadata) * (args.rank + 1) // args.world_size

@@ -221,8 +221,22 @@ def postprocess_mesh(
     input_files,
     output_files,
 ):
+    input_path = input_files.path(".glb", shape_id=shape_id, view_id=view_id)
+    input_fail_path = input_files.path(".fail", shape_id=shape_id, view_id=view_id)
+    output_paths = {method: files.path(".glb", shape_id=shape_id, view_id=view_id) for method, files in output_files.items()}
+    fail_paths = {method: files.path(".fail", shape_id=shape_id, view_id=view_id) for method, files in output_files.items()}
+
+    if input_fail_path.is_file():
+        reason = input_fail_path.read_text(encoding="utf-8")
+        for method in output_files:
+            if output_paths[method].exists():
+                output_paths[method].unlink()
+            fail_paths[method].write_text(reason, encoding="utf-8")
+
+        return {"idx": idx, **{files.rel_path: True for files in output_files.values()}}
+
     mesh = trimesh.load(
-        input_files.path(".glb", shape_id=shape_id, view_id=view_id),
+        input_path,
         force="mesh",
         process=False,
     )
@@ -286,8 +300,9 @@ def postprocess_mesh(
     for method, (output_vertices, output_faces) in outputs.items():
         glb_vertices = output_vertices[:, [0, 2, 1]].copy()
         glb_vertices[:, 2] *= -1
-        output_path = output_files[method].path(".glb", shape_id=shape_id, view_id=view_id)
-        trimesh.Trimesh(vertices=glb_vertices, faces=output_faces, process=False).export(output_path)
+        trimesh.Trimesh(vertices=glb_vertices, faces=output_faces, process=False).export(output_paths[method])
+        if fail_paths[method].exists():
+            fail_paths[method].unlink()
 
     return {"idx": idx, **{files.rel_path: True for files in output_files.values()}}
 
@@ -326,9 +341,14 @@ def main():
         prediction_files = workspace.files(args.symmetry_prediction_folder)
 
     metadata = workspace.read_metadata().sort_values("idx")
-    metadata = metadata.loc[[input_files.path(".glb", shape_id=row["shape_id"], view_id=row["view_id"]).is_file() for _, row in metadata.iterrows()]]
+    output_columns = [files.rel_path for files in output_files.values()]
+    for column in output_columns:
+        if column not in metadata.columns:
+            metadata[column] = False
+
     if not args.recompute_finished:
-        metadata = metadata.loc[[not all(files.path(".glb", shape_id=row["shape_id"], view_id=row["view_id"]).is_file() for files in output_files.values()) for _, row in metadata.iterrows()]]
+        completed = metadata[output_columns].eq(True).all(axis=1)
+        metadata = metadata.loc[~completed]
 
     start = len(metadata) * args.rank // args.world_size
     end = len(metadata) * (args.rank + 1) // args.world_size

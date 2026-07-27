@@ -52,7 +52,7 @@ def extract_abo_file(
         if temporary.exists():
             temporary.unlink()
 
-    return {"sha256": sha256, "raw": raw_files.exists(sha256)}
+    return {"sha256": sha256, "raw": True}
 
 
 class ABODataset(DatasetWorkspace):
