@@ -23,6 +23,8 @@ SYMMETRY_PREDICTION_FOLDER="${SYMMETRY_PREDICTION_FOLDER:-}"
 RANK="$SLURM_ARRAY_TASK_ID"
 WORLD_SIZE="${WORLD_SIZE:-$((SLURM_ARRAY_TASK_MAX + 1))}"
 
+mkdir -p "$HOME/.cache/triton" "$HOME/.cache/cuda_compute_cache"
+
 cd "$DATA_DIR"
 
 apptainer exec --nv \
@@ -31,6 +33,8 @@ apptainer exec --nv \
     --bind "$REPO_DIR/evaluation:/workspace/SymTRELLIS/evaluation:ro" \
     --bind "$REPO_DIR/preprocess:/workspace/SymTRELLIS/preprocess:ro" \
     --bind "$HOME/.cache:$HOME/.cache" \
+    --env "TRITON_CACHE_DIR=$HOME/.cache/triton" \
+    --env "CUDA_CACHE_PATH=$HOME/.cache/cuda_compute_cache" \
     --bind "$DATA_DIR:$DATA_DIR" \
     --pwd /workspace/SymTRELLIS \
     "$SIF" \
