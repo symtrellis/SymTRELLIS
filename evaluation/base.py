@@ -12,7 +12,7 @@ class Files:
     dir: Path = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.rel_path, str) or not self.rel_path:
+        if not self.rel_path:
             raise ValueError("rel_path must be a non-empty string")
 
         relative = PurePosixPath(self.rel_path)
@@ -21,7 +21,7 @@ class Files:
         if relative.as_posix() != self.rel_path:
             raise ValueError(f"rel_path must be normalized: {self.rel_path!r}")
 
-        if not isinstance(self.format, str) or not self.format:
+        if not self.format:
             raise ValueError("format must be a non-empty string")
 
         object.__setattr__(self, "dir", self.root.joinpath(*relative.parts))
@@ -40,7 +40,7 @@ class Files:
 @dataclass(frozen=True)
 class Workspace:
     root: Path
-    shape_labels: dict[int, dict[str, str]]
+    shape_labels: dict[int, dict[str, str | int]]
 
     def __init__(self, root: str | Path) -> None:
         root = Path(root).expanduser().resolve()
@@ -103,7 +103,7 @@ class Workspace:
         )
 
     def path(self, rel_path: str) -> Path:
-        if not isinstance(rel_path, str) or not rel_path:
+        if not rel_path:
             raise ValueError("rel_path must be a non-empty string")
 
         relative = PurePosixPath(rel_path)

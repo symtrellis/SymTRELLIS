@@ -269,8 +269,9 @@ def postprocess_mesh(
         include_identity=True,
     )
 
-    outputs = {
-        "sector_replication": sector_replication(
+    method = "sector_replication"
+    try:
+        output_vertices, output_faces = sector_replication(
             vertices=vertices,
             faces=faces,
             center=center,
@@ -279,8 +280,21 @@ def postprocess_mesh(
             translations=sector_translations,
             reflection=reflection,
             phase_samples=sector_phase_samples,
-        ),
-        "voxel_majority": voxel_occupancy_majority(
+        )
+        glb_vertices = output_vertices[:, [0, 2, 1]].copy()
+        glb_vertices[:, 2] *= -1
+        trimesh.Trimesh(vertices=glb_vertices, faces=output_faces, process=False).export(output_paths[method])
+    except Exception as error:
+        if output_paths[method].exists():
+            output_paths[method].unlink()
+        fail_paths[method].write_text(f"Sector replication failed: {error}\n", encoding="utf-8")
+    else:
+        if fail_paths[method].exists():
+            fail_paths[method].unlink()
+
+    method = "voxel_majority"
+    try:
+        output_vertices, output_faces = voxel_occupancy_majority(
             vertices=vertices,
             faces=faces,
             transforms=transforms,
@@ -288,19 +302,35 @@ def postprocess_mesh(
             resolution=voxel_resolution,
             bbox_padding=bbox_padding,
             slab_depth=voxel_slab_depth,
-        ),
-        "closest_point_average": closest_point_orbit_average(
+        )
+        glb_vertices = output_vertices[:, [0, 2, 1]].copy()
+        glb_vertices[:, 2] *= -1
+        trimesh.Trimesh(vertices=glb_vertices, faces=output_faces, process=False).export(output_paths[method])
+    except Exception as error:
+        if output_paths[method].exists():
+            output_paths[method].unlink()
+        fail_paths[method].write_text(f"Voxel majority failed: {error}\n", encoding="utf-8")
+    else:
+        if fail_paths[method].exists():
+            fail_paths[method].unlink()
+
+    method = "closest_point_average"
+    try:
+        output_vertices, output_faces = closest_point_orbit_average(
             vertices=vertices,
             faces=faces,
             transforms=transforms,
             translations=translations,
             iterations=closest_point_iterations,
-        ),
-    }
-    for method, (output_vertices, output_faces) in outputs.items():
+        )
         glb_vertices = output_vertices[:, [0, 2, 1]].copy()
         glb_vertices[:, 2] *= -1
         trimesh.Trimesh(vertices=glb_vertices, faces=output_faces, process=False).export(output_paths[method])
+    except Exception as error:
+        if output_paths[method].exists():
+            output_paths[method].unlink()
+        fail_paths[method].write_text(f"Closest-point average failed: {error}\n", encoding="utf-8")
+    else:
         if fail_paths[method].exists():
             fail_paths[method].unlink()
 
@@ -323,8 +353,8 @@ def main():
     args = parser.parse_args()
 
     workspace = Workspace(args.workspace_dir)
-    shape_tag = args.shape_folder.strip("/").replace("/", "_")
-    symmetry_tag = args.symmetry_prediction_folder.strip("/").replace("/", "_") if args.symmetry_prediction_folder else "gt"
+    shape_tag = args.shape_folder.removeprefix("experiments/").replace("/", "_")
+    symmetry_tag = args.symmetry_prediction_folder.rsplit("/", 1)[-1] if args.symmetry_prediction_folder else "gt"
     experiment_name = f"postprocess_{shape_tag}_symmetry_{symmetry_tag}"
 
     input_files = workspace.files(args.shape_folder)

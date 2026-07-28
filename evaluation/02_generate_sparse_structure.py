@@ -114,7 +114,7 @@ def generate_sparse_structure(
                     O_dst2src=relation_transforms,
                     t_dst2src=relation_translations,
                     s_dst2src=relation_signs,
-                ).cpu()
+                ).to(torch.device("cpu"))
             )
             source_row_chunks.append(source_rows.cpu())
             destination_row_chunks.append(destination_rows.cpu())
@@ -207,19 +207,17 @@ def main() -> None:
 
     workspace = Workspace(args.workspace_dir)
     mapper_tag = args.mapper_path.strip("/").replace("/", "_")
-    symmetry_tag = args.symmetry_prediction_folder.strip("/").replace("/", "_") if args.symmetry_prediction_folder else "gt"
-    retry_tag = f"retry_{args.max_retry}_threshold_{args.voxel_count_threshold}" if args.allow_retry else "no_retry"
+    symmetry_tag = args.symmetry_prediction_folder.rsplit("/", 1)[-1] if args.symmetry_prediction_folder else "gt"
 
     experiment_name = "_".join(
         [
-            f"ss_flow_seed_{args.seed}",
-            f"steps_{args.steps}",
-            f"noise_strength_{args.noise_strength}",
-            f"guidance_strength_{args.guidance_strength}",
-            f"guidance_duration_{args.guidance_duration}",
-            f"mapper_{mapper_tag}",
-            f"symmetry_{symmetry_tag}",
-            retry_tag,
+            f"ss_s{args.seed}",
+            f"ns{args.noise_strength}",
+            f"gs{args.guidance_strength}",
+            f"gd{args.guidance_duration}",
+            f"m_{mapper_tag}",
+            f"sym_{symmetry_tag}",
+            f"vc{args.voxel_count_threshold}",
         ]
     )
     condition_files = workspace.files(args.condition_folder)

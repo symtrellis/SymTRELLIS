@@ -18,7 +18,7 @@ from symtrellis.detection.icp import iterative_closest_point
 from symtrellis.detection.sampling import sample_random_rotations
 from symtrellis.symmetry import get_3d_point_group
 
-from .base import Files, Workspace
+from .base import Workspace
 
 AXIS_VECTORS = {"x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0], "z": [0.0, 0.0, 1.0]}
 
@@ -362,8 +362,8 @@ def main():
     args = parser.parse_args()
 
     workspace = Workspace(args.workspace_dir)
-    shape_tag = args.shape_folder.strip("/").replace("/", "_")
-    experiment_name = f"eval_score_{shape_tag}"
+    shape_tag = args.shape_folder.removeprefix("experiments/").replace("/", "_")
+    experiment_name = f"score_{shape_tag}"
 
     prediction_files = workspace.files(args.shape_folder)
     ground_truth_files = workspace.files(

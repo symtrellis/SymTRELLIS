@@ -161,7 +161,7 @@ def generate_shape(
                     output_path.unlink()
                 return {"idx": idx, output_files.rel_path: True}
 
-            coefficient_chunks.append(coefficients.cpu())
+            coefficient_chunks.append(coefficients.to(torch.device("cpu")))
             source_row_chunks.append(source_rows.cpu())
             destination_row_chunks.append(destination_rows.cpu())
 
@@ -259,18 +259,17 @@ def main() -> None:
 
     workspace = Workspace(args.workspace_dir)
     mapper_tag = args.mapper_path.strip("/").replace("/", "_")
-    sparse_structure_tag = args.sparse_structure_folder.strip("/").replace("/", "_")
-    symmetry_tag = args.symmetry_prediction_folder.strip("/").replace("/", "_") if args.symmetry_prediction_folder else "gt"
+    sparse_structure_tag = args.sparse_structure_folder.rsplit("/", 1)[-1]
+    symmetry_tag = args.symmetry_prediction_folder.rsplit("/", 1)[-1] if args.symmetry_prediction_folder else "gt"
     experiment_name = "_".join(
         [
-            f"shape_flow_seed_{args.seed}",
-            f"steps_{args.steps}",
-            f"noise_strength_{args.noise_strength}",
-            f"guidance_strength_{args.guidance_strength}",
-            f"guidance_duration_{args.guidance_duration}",
-            f"mapper_{mapper_tag}",
-            f"sparse_structure_{sparse_structure_tag}",
-            f"symmetry_{symmetry_tag}",
+            f"shape_s{args.seed}",
+            f"ns{args.noise_strength}",
+            f"gs{args.guidance_strength}",
+            f"gd{args.guidance_duration}",
+            f"m_{mapper_tag}",
+            f"ss_{sparse_structure_tag}",
+            f"sym_{symmetry_tag}",
         ]
     )
 
