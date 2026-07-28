@@ -95,6 +95,7 @@ def main():
         return
 
     device = torch.device("cuda:0")
+    torch.cuda.init()
     torch.cuda.reset_peak_memory_stats(device)
     background_remover = BackgroundRemover()
     pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(

@@ -201,6 +201,7 @@ def main() -> None:
     args = parser.parse_args()
 
     device = torch.device("cuda:0")
+    torch.cuda.init()
     torch.cuda.reset_peak_memory_stats(device)
     encoder = trellis2_models.from_pretrained(args.ss_encoder).eval().to(device)
 

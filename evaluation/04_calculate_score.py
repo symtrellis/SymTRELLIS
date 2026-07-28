@@ -387,6 +387,7 @@ def main():
         return
 
     device = torch.device("cuda:0")
+    torch.cuda.init()
     torch.cuda.reset_peak_memory_stats(device)
     inputs = []
 

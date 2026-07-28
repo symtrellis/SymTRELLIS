@@ -117,6 +117,7 @@ def main():
         return
 
     device = torch.device("cuda:0")
+    torch.cuda.init()
     torch.cuda.reset_peak_memory_stats(device)
     background_model = BriaRMBG.from_pretrained(RMBG_MODEL_PATH).to(device).eval()
     pipeline = TripoSGPipeline.from_pretrained(TRIPOSG_MODEL_PATH).to(device, torch.float16)

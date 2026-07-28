@@ -242,6 +242,7 @@ def main() -> None:
         return
 
     device = torch.device("cuda:0")
+    torch.cuda.init()
     torch.cuda.reset_peak_memory_stats(device)
 
     flow_model = trellis2_model_registry.from_pretrained(SPARSE_STRUCTURE_FLOW_MODEL).eval()
