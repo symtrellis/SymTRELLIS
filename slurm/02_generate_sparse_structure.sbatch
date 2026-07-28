@@ -43,6 +43,10 @@ apptainer exec --nv \
     --bind "$HOME/.cache:$HOME/.cache" \
     --env "TRITON_CACHE_DIR=$HOME/.cache/triton" \
     --env "CUDA_CACHE_PATH=$HOME/.cache/cuda_compute_cache" \
+    --env "HF_HOME=$HOME/.cache/huggingface" \
+    --env "HF_HUB_CACHE=$HOME/.cache/huggingface/hub" \
+    --env "HF_HUB_OFFLINE=1" \
+    --env "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
     --bind "$DATA_DIR:$DATA_DIR" \
     --pwd /workspace/SymTRELLIS \
     "$SIF" \
