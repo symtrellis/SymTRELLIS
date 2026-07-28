@@ -22,14 +22,19 @@ SIF="$HOME/symtrellis.sif"
 RANK="$SLURM_ARRAY_TASK_ID"
 WORLD_SIZE="${WORLD_SIZE:-$((SLURM_ARRAY_TASK_MAX + 1))}"
 
-cd "$REPO_DIR"
+cd "$DATA_DIR"
 
 apptainer exec --nv \
-    --bind "$REPO_DIR:$REPO_DIR" \
+    --no-home \
+    --no-mount cwd \
+    --bind "$REPO_DIR/evaluation:/workspace/SymTRELLIS/evaluation:ro" \
+    --bind "$REPO_DIR/preprocess:/workspace/SymTRELLIS/preprocess:ro" \
+    --bind "$HOME/.cache:$HOME/.cache" \
     --bind "$DATA_DIR:$DATA_DIR" \
+    --pwd /workspace/SymTRELLIS \
     "$SIF" \
     python -m evaluation.04_calculate_score \
-        --workspace-dir "$DATA_DIR" \
-        --shape-folder "$SHAPE_FOLDER" \
-        --rank "$RANK" \
-        --world-size "$WORLD_SIZE"
+    --workspace-dir "$DATA_DIR" \
+    --shape-folder "$SHAPE_FOLDER" \
+    --rank "$RANK" \
+    --world-size "$WORLD_SIZE"

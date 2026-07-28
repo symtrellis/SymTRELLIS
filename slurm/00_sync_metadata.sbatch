@@ -25,12 +25,15 @@ if [ -n "$FOLDER" ]; then
     SYNC_ARGS+=(--folders "$FOLDER")
 fi
 
-cd "$REPO_DIR"
+cd "$DATA_DIR"
 
 apptainer exec \
-    --bind "$REPO_DIR:$REPO_DIR" \
+    --no-home \
+    --no-mount cwd \
+    --bind "$REPO_DIR/evaluation:/workspace/SymTRELLIS/evaluation:ro" \
     --bind "$DATA_DIR:$DATA_DIR" \
+    --pwd /workspace/SymTRELLIS \
     "$SIF" \
     python -m evaluation.sync_metadata \
-        --workspace-dir "$DATA_DIR" \
-        "${SYNC_ARGS[@]}"
+    --workspace-dir "$DATA_DIR" \
+    "${SYNC_ARGS[@]}"

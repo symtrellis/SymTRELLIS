@@ -30,23 +30,29 @@ VOXEL_COUNT_THRESHOLD="${VOXEL_COUNT_THRESHOLD:-0}"
 RANK="$SLURM_ARRAY_TASK_ID"
 WORLD_SIZE="${WORLD_SIZE:-$((SLURM_ARRAY_TASK_MAX + 1))}"
 
-cd "$REPO_DIR"
+cd "$DATA_DIR"
 
 apptainer exec --nv \
-    --bind "$REPO_DIR:$REPO_DIR" \
+    --no-home \
+    --no-mount cwd \
+    --bind "$REPO_DIR/evaluation:/workspace/SymTRELLIS/evaluation:ro" \
+    --bind "$REPO_DIR/inference:/workspace/SymTRELLIS/inference:ro" \
+    --bind "$REPO_DIR/preprocess:/workspace/SymTRELLIS/preprocess:ro" \
+    --bind "$HOME/.cache:$HOME/.cache" \
     --bind "$DATA_DIR:$DATA_DIR" \
+    --pwd /workspace/SymTRELLIS \
     "$SIF" \
     python -m evaluation.02_generate_sparse_structure \
-        --workspace-dir "$DATA_DIR" \
-        --mapper-path "$MAPPER_PATH" \
-        --symmetry-prediction-folder "$SYMMETRY_PREDICTION_FOLDER" \
-        --noise-strength "$NOISE_STRENGTH" \
-        --guidance-strength "$GUIDANCE_STRENGTH" \
-        --guidance-duration "$GUIDANCE_DURATION" \
-        --seed "$SEED" \
-        --steps "$STEPS" \
-        --allow-retry \
-        --max-retry "$MAX_RETRY" \
-        --voxel-count-threshold "$VOXEL_COUNT_THRESHOLD" \
-        --rank "$RANK" \
-        --world-size "$WORLD_SIZE"
+    --workspace-dir "$DATA_DIR" \
+    --mapper-path "$MAPPER_PATH" \
+    --symmetry-prediction-folder "$SYMMETRY_PREDICTION_FOLDER" \
+    --noise-strength "$NOISE_STRENGTH" \
+    --guidance-strength "$GUIDANCE_STRENGTH" \
+    --guidance-duration "$GUIDANCE_DURATION" \
+    --seed "$SEED" \
+    --steps "$STEPS" \
+    --allow-retry \
+    --max-retry "$MAX_RETRY" \
+    --voxel-count-threshold "$VOXEL_COUNT_THRESHOLD" \
+    --rank "$RANK" \
+    --world-size "$WORLD_SIZE"
