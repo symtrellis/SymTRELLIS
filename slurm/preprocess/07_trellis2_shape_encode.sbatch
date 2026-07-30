@@ -45,6 +45,7 @@ mkdir -p \
     "$DATA_DIR" \
     "$HOME/.cache/triton" \
     "$HOME/.cache/cuda_compute_cache" \
+    "$HOME/.cache/flex_gemm" \
     "$HOME/.cache/huggingface"
 
 cd "$DATA_DIR"
@@ -57,6 +58,7 @@ apptainer exec --nv \
     --bind "$DATA_DIR:$DATA_DIR" \
     --env "TRITON_CACHE_DIR=$HOME/.cache/triton" \
     --env "CUDA_CACHE_PATH=$HOME/.cache/cuda_compute_cache" \
+    --env "FLEX_GEMM_AUTOTUNE_CACHE_PATH=$HOME/.cache/flex_gemm/autotune_cache.json" \
     --env "HF_HOME=$HOME/.cache/huggingface" \
     --env "HF_HUB_CACHE=$HOME/.cache/huggingface/hub" \
     --env "HF_HUB_OFFLINE=$HF_HUB_OFFLINE" \

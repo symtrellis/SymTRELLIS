@@ -29,7 +29,7 @@ STEPS="${STEPS:-32}"
 RANK="$SLURM_ARRAY_TASK_ID"
 WORLD_SIZE="${WORLD_SIZE:-$((SLURM_ARRAY_TASK_MAX + 1))}"
 
-mkdir -p "$HOME/.cache/triton" "$HOME/.cache/cuda_compute_cache"
+mkdir -p "$HOME/.cache/triton" "$HOME/.cache/cuda_compute_cache" "$HOME/.cache/flex_gemm"
 
 cd "$DATA_DIR"
 
@@ -42,6 +42,7 @@ apptainer exec --nv \
     --bind "$HOME/.cache:$HOME/.cache" \
     --env "TRITON_CACHE_DIR=$HOME/.cache/triton" \
     --env "CUDA_CACHE_PATH=$HOME/.cache/cuda_compute_cache" \
+    --env "FLEX_GEMM_AUTOTUNE_CACHE_PATH=$HOME/.cache/flex_gemm/autotune_cache.json" \
     --env "HF_HOME=$HOME/.cache/huggingface" \
     --env "HF_HUB_CACHE=$HOME/.cache/huggingface/hub" \
     --env "HF_HUB_OFFLINE=1" \
