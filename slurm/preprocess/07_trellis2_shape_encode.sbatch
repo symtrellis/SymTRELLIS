@@ -54,6 +54,7 @@ apptainer exec --nv \
     --no-home \
     --no-mount cwd \
     --bind "$REPO_DIR/preprocess:/workspace/SymTRELLIS/preprocess:ro" \
+    --bind "$REPO_DIR/dataset:/workspace/SymTRELLIS/dataset:ro" \
     --bind "$HOME/.cache:$HOME/.cache" \
     --bind "$DATA_DIR:$DATA_DIR" \
     --env "TRITON_CACHE_DIR=$HOME/.cache/triton" \
