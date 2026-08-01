@@ -247,7 +247,7 @@ def main() -> None:
     parser.add_argument("--sparse-structure-folder", required=True)
     parser.add_argument("--mapper-path", required=True)
     parser.add_argument("--symmetry-prediction-folder")
-    parser.add_argument("--noise-strength", type=float, default=0.2)
+    parser.add_argument("--noise-strength", type=float, default=0.5)
     parser.add_argument("--guidance-strength", type=float, default=0.4)
     parser.add_argument("--guidance-duration", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=114514)

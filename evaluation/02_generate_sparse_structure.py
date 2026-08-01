@@ -192,7 +192,7 @@ def main() -> None:
     parser.add_argument("--condition-folder", default="conditions")
     parser.add_argument("--mapper-path", required=True)
     parser.add_argument("--symmetry-prediction-folder")
-    parser.add_argument("--noise-strength", type=float, default=0.2)
+    parser.add_argument("--noise-strength", type=float, default=0.8)
     parser.add_argument("--guidance-strength", type=float, default=0.9)
     parser.add_argument("--guidance-duration", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=114514)
