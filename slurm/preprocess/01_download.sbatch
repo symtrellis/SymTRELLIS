@@ -30,7 +30,7 @@ if [ "$RECOMPUTE_FINISHED" = "1" ]; then
     RECOMPUTE_ARGS+=(--recompute-finished)
 fi
 
-mkdir -p "$DATA_DIR" "$HOME/.cache/huggingface"
+mkdir -p "$DATA_DIR" "$HOME/.cache/huggingface" "$HOME/.cache/objaverse"
 cd "$DATA_DIR"
 
 apptainer exec \
@@ -38,6 +38,7 @@ apptainer exec \
     --no-mount cwd \
     --bind "$REPO_DIR/preprocess:/workspace/SymTRELLIS/preprocess:ro" \
     --bind "$HOME/.cache:$HOME/.cache" \
+    --bind "$HOME/.cache/objaverse:$HOME/.objaverse" \
     --bind "$DATA_DIR:$DATA_DIR" \
     --env "HF_HOME=$HOME/.cache/huggingface" \
     --env "HF_HUB_CACHE=$HOME/.cache/huggingface/hub" \

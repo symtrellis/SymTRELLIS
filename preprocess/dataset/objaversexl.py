@@ -57,14 +57,10 @@ class ObjaverseXLDataset(DatasetWorkspace):
         annotations = annotations[annotations["sha256"].isin([record["sha256"] for record in records])]
         oxl.download_objects(
             annotations,
-            download_dir=str(raw_files.dir),
+            download_dir=None,
             processes=num_workers,
             handle_found_object=partial(store_downloaded_file, workspace=self),
         )
-
-        cache_dir = self.path("raw/hf-objaverse-v1")
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir)
 
         results = [{"sha256": record["sha256"], "raw": True} for record in records if raw_files.find(record["sha256"]) is not None]
         return pd.DataFrame(results, columns=["sha256", "raw"]).drop_duplicates(
