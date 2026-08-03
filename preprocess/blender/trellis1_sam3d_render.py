@@ -337,10 +337,12 @@ def main(arg) -> None:
     print("[INFO] Meshes triangulated.")
 
     mesh_path = os.path.join(arg.output_folder, "mesh.ply")
-    if bpy.app.version[0] < 4:
+    if bpy.app.version < (4, 0, 0):
         bpy.ops.export_mesh.ply(filepath=mesh_path)
-    else:
+    elif bpy.app.version < (4, 1, 0):
         bpy.ops.wm.ply_export(filepath=mesh_path)
+    else:
+        bpy.ops.wm.ply_export(filepath=mesh_path, export_attributes=False)
 
 
 if __name__ == "__main__":
