@@ -44,6 +44,7 @@ apptainer exec \
     --env "HF_HUB_CACHE=$HOME/.cache/huggingface/hub" \
     --env "HF_HUB_OFFLINE=$HF_HUB_OFFLINE" \
     --env "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
+    --env "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt" \
     --pwd /workspace/SymTRELLIS \
     "$SIF" \
     python -m preprocess.download "$DATASET" \
