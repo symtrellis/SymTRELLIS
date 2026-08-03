@@ -21,7 +21,7 @@ from trellis2.representations.mesh import Mesh
 from trimesh.visual import TextureVisuals
 from trimesh.visual.material import PBRMaterial
 
-from symtrellis.flow import AffineFlowStep, BaseFlowPredictor, BaseInitialNoiseSampler
+from symtrellis.flow import AffineFlowStep, BaseFlowPredictor, BaseInitialNoiseSampler, SymmetryProjectionNoiseSampler
 
 # Official TRELLIS.2 sampler defaults expressed in SymTRELLIS flow/CFG convention.
 TRELLIS2_SPARSE_STRUCTURE_STEPS = 12
@@ -152,6 +152,62 @@ class TRELLIS2SparseStructureLatentNoiseSampler(BaseInitialNoiseSampler):
             generator=g,
         )
         return noise
+
+
+class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNoiseSampler):
+
+    def __init__(
+        self,
+        sampler: BaseInitialNoiseSampler,
+        symmetry_strength: float = 1.0,
+        rescale_type: str = "global",
+        rescale_strength: float = 1.0,
+    ) -> None:
+        assert rescale_type in ("global", "voxel")
+
+        super().__init__(
+            sampler=sampler,
+            symmetry_strength=symmetry_strength,
+        )
+        self.rescale_type = rescale_type
+        self.rescale_strength = rescale_strength
+
+    def sample(
+        self,
+        projector,
+        to_sparse_view,
+        to_original_view,
+        self_include: bool,
+        **kwargs,
+    ):
+        noise_native = self.sampler.sample(**kwargs)
+        if self.symmetry_strength == 0.0:
+            return noise_native
+
+        projected_rows = projector.forward_project(
+            feats=to_sparse_view(noise_native),
+            self_include=self_include,
+        )
+        noise_projected = to_original_view(projected_rows)
+
+        noise_symm = self.symmetry_strength * noise_projected + (1.0 - self.symmetry_strength) * noise_native
+
+        if self.rescale_strength == 0.0:
+            return noise_symm
+
+        if self.rescale_type == "global":
+            native_norm = noise_native.flatten(1).norm(dim=1)
+            symm_norm = noise_symm.flatten(1).norm(dim=1)
+            scale = native_norm / symm_norm.clamp_min(torch.finfo(noise_native.dtype).eps)
+            scale = scale[:, None, None, None, None]
+        else:
+            scale = noise_native.norm(dim=1, keepdim=True) / noise_symm.norm(
+                dim=1,
+                keepdim=True,
+            ).clamp_min(torch.finfo(noise_native.dtype).eps)
+
+        noise_rescaled = noise_symm * scale
+        return self.rescale_strength * noise_rescaled + (1.0 - self.rescale_strength) * noise_symm
 
 
 def trellis2_dense_grid_coords(batch_size: int, grid_size: int, device: torch.device | str) -> torch.Tensor:
@@ -425,6 +481,80 @@ class TRELLIS2SparseLatentNoiseSampler(BaseInitialNoiseSampler):
             feats = feats_template[coords[:, 1], coords[:, 2], coords[:, 3]]
 
         return sp_class(feats=feats, coords=coords)
+
+
+class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoiseSampler):
+
+    def __init__(
+        self,
+        sampler: BaseInitialNoiseSampler,
+        symmetry_strength: float = 1.0,
+        rescale_type: str = "global",
+        rescale_strength: float = 1.0,
+    ) -> None:
+        assert rescale_type in ("global", "voxel")
+
+        super().__init__(
+            sampler=sampler,
+            symmetry_strength=symmetry_strength,
+        )
+        self.rescale_type = rescale_type
+        self.rescale_strength = rescale_strength
+
+    def sample(
+        self,
+        projector,
+        self_include: bool,
+        **kwargs,
+    ):
+        noise_native = self.sampler.sample(**kwargs)
+        if self.symmetry_strength == 0.0:
+            return noise_native
+
+        std = noise_native.feats.new_tensor(TRELLIS2_SHAPE_LATENT_STD)[None]
+        projected_vectors = projector.forward_project(
+            feats=noise_native.feats * std,
+            self_include=self_include,
+        )
+        projected_rows = projected_vectors / std
+
+        noise_symm = self.symmetry_strength * projected_rows + (1.0 - self.symmetry_strength) * noise_native.feats
+
+        if self.rescale_strength == 0.0:
+            return noise_native.replace(noise_symm)
+
+        if self.rescale_type == "global":
+            batch_indices = noise_native.coords[:, 0].long()
+            batch_count = int(batch_indices.max().item()) + 1
+
+            native_norm = noise_symm.new_zeros(batch_count)
+            symm_norm = noise_symm.new_zeros(batch_count)
+
+            native_norm.scatter_add_(
+                0,
+                batch_indices,
+                noise_native.feats.square().sum(dim=1),
+            )
+            symm_norm.scatter_add_(
+                0,
+                batch_indices,
+                noise_symm.square().sum(dim=1),
+            )
+
+            scale = native_norm.sqrt() / symm_norm.sqrt().clamp_min(torch.finfo(noise_symm.dtype).eps)
+            scale = scale[batch_indices, None]
+        else:
+            scale = noise_native.feats.norm(
+                dim=1,
+                keepdim=True,
+            ) / noise_symm.norm(
+                dim=1,
+                keepdim=True,
+            ).clamp_min(torch.finfo(noise_symm.dtype).eps)
+
+        noise_rescaled = noise_symm * scale
+        noise = self.rescale_strength * noise_rescaled + (1.0 - self.rescale_strength) * noise_symm
+        return noise_native.replace(noise)
 
 
 TRELLIS2ShapeLatentNoiseSampler = TRELLIS2SparseLatentNoiseSampler
@@ -962,6 +1092,7 @@ __all__ = [
     "TRELLIS2_SPARSE_STRUCTURE_RESCALE_T",
     "TRELLIS2_SPARSE_STRUCTURE_STEPS",
     "TRELLIS2SparseStructureLatentNoiseSampler",
+    "TRELLIS2SparseStructureSymmetryProjectionNoiseSampler",
     "TRELLIS2SparseStructureView",
     "trellis2_dense_grid_coords",
     "trelli2_mesh_to_glb",
@@ -970,6 +1101,7 @@ __all__ = [
     "trellis2_sparse_structure_logits_to_coords",
     "trellis2_sparse_view_to_sparse_structure_latent",
     "TRELLIS2SparseLatentNoiseSampler",
+    "TRELLIS2SparseLatentSymmetryProjectionNoiseSampler",
     "TRELLIS2_SHAPE_LATENT_CFG_INTERVAL",
     "TRELLIS2_SHAPE_LATENT_CFG_RESCALE",
     "TRELLIS2_SHAPE_LATENT_CFG_STRENGTH",

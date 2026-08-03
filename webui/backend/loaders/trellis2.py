@@ -29,7 +29,7 @@ REMBG_MODEL = "briaai/RMBG-2.0"
 
 SYMTRELLIS_REPO = "symtrellis/SymTRELLIS"
 SPARSE_STRUCTURE_MAPPER = "trellis2_sparse_structure_neighbor_graph_finetune"
-SHAPE_MAPPER = "trellis2_shape_neighbor_graph_pretrain"
+SHAPE_MAPPER = "trellis2_shape_neighbor_graph_finetune"
 
 
 class TRELLIS2Runtime:

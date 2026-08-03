@@ -16,6 +16,7 @@ from inference.trellis2 import (
     TRELLIS2_SPARSE_STRUCTURE_RESCALE_T,
     TRELLIS2FlowPredictor,
     TRELLIS2SparseStructureLatentNoiseSampler,
+    TRELLIS2SparseStructureSymmetryProjectionNoiseSampler,
     TRELLIS2SparseStructureView,
     trellis2_dense_grid_coords,
     trellis2_sparse_structure_logits_to_coords,
@@ -27,7 +28,6 @@ from symtrellis.flow import (
     ClassifierFreeGuidanceWrapper,
     EulerSolver,
     SymmetryProjectionGuidanceWrapper,
-    SymmetryProjectionNoiseSampler,
 )
 from symtrellis.mapper import BaseSpatialTransformLatentMapper, SymmetryProjector, concat_coeff, from_pretrained
 from symtrellis.symmetry import build_symmetry_relation_inputs, get_3d_point_group
@@ -254,7 +254,7 @@ def main() -> None:
 
     noise_sampler = TRELLIS2SparseStructureLatentNoiseSampler()
     if args.noise_strength > 0.0:
-        noise_sampler = SymmetryProjectionNoiseSampler(
+        noise_sampler = TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(
             sampler=noise_sampler,
             symmetry_strength=args.noise_strength,
         )
@@ -271,7 +271,7 @@ def main() -> None:
             strength=args.guidance_strength,
             interval=(0.0, args.guidance_duration),
             symmetrize_target="x_start",
-            rescale=0.0,
+            rescale=1.0,
         )
 
     solver = EulerSolver()

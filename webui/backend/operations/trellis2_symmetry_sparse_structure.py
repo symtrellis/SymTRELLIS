@@ -7,17 +7,13 @@ import torch
 from inference.trellis2 import (
     TRELLIS2FlowPredictor,
     TRELLIS2SparseStructureLatentNoiseSampler,
+    TRELLIS2SparseStructureSymmetryProjectionNoiseSampler,
     TRELLIS2SparseStructureView,
     trellis2_dense_grid_coords,
     trellis2_occ_to_visualization_mesh,
     trellis2_sparse_structure_logits_to_coords,
 )
-from symtrellis.flow import (
-    ClassifierFreeGuidanceWrapper,
-    EulerSolver,
-    SymmetryProjectionGuidanceWrapper,
-    SymmetryProjectionNoiseSampler,
-)
+from symtrellis.flow import ClassifierFreeGuidanceWrapper, EulerSolver, SymmetryProjectionGuidanceWrapper
 from symtrellis.mapper import SymmetryProjector, concat_coeff
 from symtrellis.symmetry import build_symmetry_relation_inputs, get_3d_point_group
 
@@ -203,7 +199,7 @@ class Trellis2SymmetrySparseStructure(Operation):
             condition = condition.to(DEVICE)
             neg_condition = torch.zeros_like(condition)
 
-            noise_sampler = SymmetryProjectionNoiseSampler(
+            noise_sampler = TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(
                 sampler=TRELLIS2SparseStructureLatentNoiseSampler(),
                 symmetry_strength=noise_symmetry_projection_strength,
             )
@@ -231,7 +227,7 @@ class Trellis2SymmetrySparseStructure(Operation):
                 strength=symmetry_projection_strength,
                 interval=symmetry_projection_duration,
                 symmetrize_target="x_start",
-                rescale=0.0,
+                rescale=1.0,
             )
 
             flow_solver = EulerSolver()

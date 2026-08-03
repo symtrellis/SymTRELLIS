@@ -16,6 +16,7 @@ from inference.trellis2 import (
     TRELLIS2_SHAPE_LATENT_CFG_STRENGTH,
     TRELLIS2_SHAPE_LATENT_RESCALE_T,
     TRELLIS2FlowPredictor,
+    TRELLIS2SparseLatentSymmetryProjectionNoiseSampler,
     TRELLIS2ShapeLatentNoiseSampler,
     TRELLIS2ShapeLatentView,
     trelli2_mesh_to_glb,
@@ -28,7 +29,6 @@ from symtrellis.flow import (
     ClassifierFreeGuidanceWrapper,
     EulerSolver,
     SymmetryProjectionGuidanceWrapper,
-    SymmetryProjectionNoiseSampler,
 )
 from symtrellis.mapper import (
     BaseSpatialTransformLatentMapper,
@@ -175,8 +175,6 @@ def generate_shape(
         latent_view = TRELLIS2ShapeLatentView(coords=coords, sp_class=SparseTensor)
         noise_projection_arguments = {
             "projector": projector,
-            "to_sparse_view": latent_view.to_sparse_view,
-            "to_original_view": latent_view.to_original_view,
             "self_include": False,
         }
         guidance_projection_arguments = {
@@ -309,7 +307,7 @@ def main() -> None:
 
     noise_sampler = TRELLIS2ShapeLatentNoiseSampler()
     if args.noise_strength > 0.0:
-        noise_sampler = SymmetryProjectionNoiseSampler(
+        noise_sampler = TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(
             sampler=noise_sampler,
             symmetry_strength=args.noise_strength,
         )

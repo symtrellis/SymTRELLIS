@@ -10,15 +10,11 @@ from inference.trellis2 import (
     TRELLIS2FlowPredictor,
     TRELLIS2ShapeLatentNoiseSampler,
     TRELLIS2ShapeLatentView,
+    TRELLIS2SparseLatentSymmetryProjectionNoiseSampler,
     trelli2_mesh_to_glb,
     trellis2_shape_latent_to_sparse_view,
 )
-from symtrellis.flow import (
-    ClassifierFreeGuidanceWrapper,
-    EulerSolver,
-    SymmetryProjectionGuidanceWrapper,
-    SymmetryProjectionNoiseSampler,
-)
+from symtrellis.flow import ClassifierFreeGuidanceWrapper, EulerSolver, SymmetryProjectionGuidanceWrapper
 from symtrellis.mapper import SymmetryProjector, concat_coeff
 from symtrellis.symmetry import build_symmetry_relation_inputs, get_3d_point_group
 
@@ -222,7 +218,7 @@ class Trellis2SymmetryShape(Operation):
             condition_512 = condition_512.to(DEVICE)
             neg_condition_512 = torch.zeros_like(condition_512)
 
-            noise_sampler = SymmetryProjectionNoiseSampler(
+            noise_sampler = TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(
                 sampler=TRELLIS2ShapeLatentNoiseSampler(),
                 symmetry_strength=noise_symmetry_projection_strength,
             )
@@ -234,8 +230,6 @@ class Trellis2SymmetryShape(Operation):
                 seed=seed,
                 device=DEVICE,
                 projector=shape_projector,
-                to_sparse_view=shape_view.to_sparse_view,
-                to_original_view=shape_view.to_original_view,
                 self_include=True,
             )
 
@@ -251,7 +245,7 @@ class Trellis2SymmetryShape(Operation):
                 strength=symmetry_projection_strength,
                 interval=symmetry_projection_duration,
                 symmetrize_target="x_start",
-                rescale=0.0,
+                rescale=1.0,
             )
 
             flow_solver = EulerSolver()
@@ -404,7 +398,7 @@ class Trellis2SymmetryShape(Operation):
                 condition_1024 = condition_1024.to(DEVICE)
                 neg_condition_1024 = torch.zeros_like(condition_1024)
 
-                noise_sampler = SymmetryProjectionNoiseSampler(
+                noise_sampler = TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(
                     sampler=TRELLIS2ShapeLatentNoiseSampler(),
                     symmetry_strength=noise_symmetry_projection_strength,
                 )
@@ -416,8 +410,6 @@ class Trellis2SymmetryShape(Operation):
                     seed=seed,
                     device=DEVICE,
                     projector=shape_projector,
-                    to_sparse_view=shape_view.to_sparse_view,
-                    to_original_view=shape_view.to_original_view,
                     self_include=True,
                 )
 
@@ -433,7 +425,7 @@ class Trellis2SymmetryShape(Operation):
                     strength=symmetry_projection_strength,
                     interval=symmetry_projection_duration,
                     symmetrize_target="x_start",
-                    rescale=0.0,
+                    rescale=1.0,
                 )
 
                 flow_solver = EulerSolver()
