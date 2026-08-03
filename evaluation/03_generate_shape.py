@@ -324,7 +324,7 @@ def main() -> None:
             strength=args.guidance_strength,
             interval=(0.0, args.guidance_duration),
             symmetrize_target="x_start",
-            rescale=0.0,
+            rescale=1.0,
         )
 
     solver = EulerSolver()
