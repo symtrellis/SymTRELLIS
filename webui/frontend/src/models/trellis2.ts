@@ -134,9 +134,9 @@ const symmetrySparseStructureProjectionDefaults: SymmetryProjectionParams = {
 };
 
 const symmetryShapeProjectionDefaults: SymmetryProjectionParams = {
-  noiseSymmetryProjectionStrength: 0.2,
+  noiseSymmetryProjectionStrength: 0.5,
   symmetryProjectionDuration: [0, 0.3],
-  symmetryProjectionStrength: 1.0,
+  symmetryProjectionStrength: 0.3,
 };
 
 const shapeDefaults: Trellis2ShapeParams = {
