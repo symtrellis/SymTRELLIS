@@ -30,7 +30,7 @@ if [ "$RECOMPUTE_FINISHED" = "1" ]; then
     RECOMPUTE_ARGS+=(--recompute-finished)
 fi
 
-mkdir -p "$DATA_DIR" "$HOME/.cache/huggingface"
+mkdir -p "$DATA_DIR" "$HOME/.cache/huggingface" "$SLURM_TMPDIR/objaverse"
 cd "$DATA_DIR"
 
 apptainer exec \
@@ -38,12 +38,15 @@ apptainer exec \
     --no-mount cwd \
     --bind "$REPO_DIR/preprocess:/workspace/SymTRELLIS/preprocess:ro" \
     --bind "$HOME/.cache:$HOME/.cache" \
+    --bind "$SLURM_TMPDIR:$SLURM_TMPDIR" \
+    --bind "$SLURM_TMPDIR/objaverse:$HOME/.objaverse" \
     --bind "$DATA_DIR:$DATA_DIR" \
     --env "HF_HOME=$HOME/.cache/huggingface" \
     --env "HF_HUB_CACHE=$HOME/.cache/huggingface/hub" \
     --env "HF_HUB_OFFLINE=$HF_HUB_OFFLINE" \
     --env "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
     --env "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt" \
+    --env "TMPDIR=$SLURM_TMPDIR" \
     --pwd /workspace/SymTRELLIS \
     "$SIF" \
     python -m preprocess.download "$DATASET" \

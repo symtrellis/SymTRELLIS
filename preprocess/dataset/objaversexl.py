@@ -59,7 +59,7 @@ class ObjaverseXLDataset(DatasetWorkspace):
             annotations = annotations[annotations["sha256"].isin([record["sha256"] for record in records])]
             oxl.download_objects(
                 annotations,
-                download_dir=temporary_dir,
+                download_dir=None,
                 processes=num_workers,
                 handle_found_object=partial(store_downloaded_file, workspace=self),
             )
