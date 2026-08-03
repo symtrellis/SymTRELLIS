@@ -128,7 +128,7 @@ const commonGenerationDefaults: CommonGenerationParams = {
 };
 
 const symmetrySparseStructureProjectionDefaults: SymmetryProjectionParams = {
-  noiseSymmetryProjectionStrength: 0.2,
+  noiseSymmetryProjectionStrength: 0.5,
   symmetryProjectionDuration: [0, 0.3],
   symmetryProjectionStrength: 1.0,
 };
@@ -136,7 +136,7 @@ const symmetrySparseStructureProjectionDefaults: SymmetryProjectionParams = {
 const symmetryShapeProjectionDefaults: SymmetryProjectionParams = {
   noiseSymmetryProjectionStrength: 0.2,
   symmetryProjectionDuration: [0, 0.3],
-  symmetryProjectionStrength: 0.3,
+  symmetryProjectionStrength: 1.0,
 };
 
 const shapeDefaults: Trellis2ShapeParams = {
