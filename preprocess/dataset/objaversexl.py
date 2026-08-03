@@ -2,6 +2,7 @@ import shutil
 from argparse import ArgumentParser
 from functools import partial
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import objaverse.xl as oxl
 import pandas as pd
@@ -53,14 +54,15 @@ class ObjaverseXLDataset(DatasetWorkspace):
         if not records:
             return pd.DataFrame(columns=["sha256", "raw"])
 
-        annotations = oxl.get_annotations()
-        annotations = annotations[annotations["sha256"].isin([record["sha256"] for record in records])]
-        oxl.download_objects(
-            annotations,
-            download_dir=None,
-            processes=num_workers,
-            handle_found_object=partial(store_downloaded_file, workspace=self),
-        )
+        with TemporaryDirectory(prefix="objaversexl_", dir="/dev/shm") as temporary_dir:
+            annotations = oxl.get_annotations(download_dir=temporary_dir)
+            annotations = annotations[annotations["sha256"].isin([record["sha256"] for record in records])]
+            oxl.download_objects(
+                annotations,
+                download_dir=temporary_dir,
+                processes=num_workers,
+                handle_found_object=partial(store_downloaded_file, workspace=self),
+            )
 
         results = [{"sha256": record["sha256"], "raw": True} for record in records if raw_files.find(record["sha256"]) is not None]
         return pd.DataFrame(results, columns=["sha256", "raw"]).drop_duplicates(
