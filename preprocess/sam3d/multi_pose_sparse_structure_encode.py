@@ -212,7 +212,7 @@ def main() -> None:
             f"seed{args.seed}",
         ]
     )
-    ss_rel_path = f"sam3d/multi_ss_latents/{feature_name}"
+    ss_rel_path = f"sam3d/multi_slats/{feature_name}"
 
     workspace = DatasetWorkspace(args.dataset_dir)
     shape_files = workspace.files("trellis1/normalized_shape", ".ply")
