@@ -1,4 +1,4 @@
-"""Encode transformed raw meshes as SAM3D sparse-structure latent archives."""
+"""Encode transformed normalized meshes as SAM3D sparse-structure latent archives."""
 
 import argparse
 import hashlib
@@ -8,9 +8,9 @@ from datetime import datetime
 from typing import Dict, List
 
 import numpy as np
+import open3d as o3d
 import pandas as pd
 import torch
-import trimesh
 from huggingface_hub import hf_hub_download
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -20,20 +20,12 @@ from preprocess.dataset.base import DatasetFiles, DatasetWorkspace
 from preprocess.utils import Pipeline, Stage, mesh_to_voxel_coords, sample_mesh_srt
 
 SPARSE_STRUCTURE_RESOLUTION = 64
-GLTF_TO_BLENDER = np.array(
-    [
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, -1.0],
-        [0.0, 1.0, 0.0],
-    ],
-    dtype=np.float32,
-)
 
 
 @torch.no_grad()
 def loader_srt_sampler(
     sha256: str,
-    raw_files: DatasetFiles,
+    shape_files: DatasetFiles,
     device: torch.device,
     num_scale: int,
     min_scale: float,
@@ -42,29 +34,20 @@ def loader_srt_sampler(
     perturbation_rad_std: float,
     seed: int,
 ) -> List[Dict[str, object]]:
-    """Load one raw mesh and emit its sampled scale-rotation-translation copies."""
-    raw_path = raw_files.find(sha256)
-    if raw_path is None:
-        raise FileNotFoundError(f"raw mesh not found: {sha256}")
-
-    mesh = trimesh.load_scene(raw_path, process=False).to_geometry()
-    if not isinstance(mesh, trimesh.Trimesh):
-        raise TypeError(f"raw file does not contain a triangle mesh: {raw_path}")
-
-    vertices = np.asarray(mesh.vertices, dtype=np.float32).copy()
-    faces = np.asarray(mesh.faces, dtype=np.int64).copy()
+    """Load one normalized mesh and emit its sampled scale-rotation-translation copies."""
+    mesh = o3d.io.read_triangle_mesh(str(shape_files.path(sha256)))
+    vertices = np.asarray(mesh.vertices)
+    faces = np.asarray(mesh.triangles)
     if len(vertices) == 0 or len(faces) == 0:
-        raise ValueError(f"empty raw mesh: {sha256}")
-    if not np.isfinite(vertices).all():
-        raise ValueError(f"non-finite vertices: {sha256}")
-    if raw_path.suffix.lower() in {".glb", ".gltf"}:
-        vertices = vertices @ GLTF_TO_BLENDER.T
+        raise ValueError(f"empty normalized mesh: {sha256}")
 
-    vertices_tensor = torch.from_numpy(vertices).to(
+    vertices_tensor = torch.from_numpy(vertices.copy()).to(
         device=device,
         dtype=torch.float32,
     )
-    faces_tensor = torch.from_numpy(faces).to(dtype=torch.int64).contiguous()
+    if not torch.isfinite(vertices_tensor).all():
+        raise ValueError(f"non-finite vertices: {sha256}")
+    faces_tensor = torch.from_numpy(faces.copy()).to(dtype=torch.int64).contiguous()
     shape_seed = int.from_bytes(
         hashlib.sha256(f"{sha256}:{seed}".encode("ascii")).digest()[:8],
         "big",
@@ -232,14 +215,14 @@ def main() -> None:
     ss_rel_path = f"sam3d/multi_ss_latents/{feature_name}"
 
     workspace = DatasetWorkspace(args.dataset_dir)
-    raw_files = workspace.files("raw", "")
+    shape_files = workspace.files("trellis1/normalized_shape", ".ply")
     ss_latent_files = workspace.files(ss_rel_path, ".zip")
     ss_latent_files.mkdir()
 
     metadata = workspace.read_metadata()
-    if "raw" not in metadata:
-        raise ValueError("metadata does not contain the required 'raw' column")
-    ready = metadata["raw"].eq(True)
+    if shape_files.rel_path not in metadata:
+        raise ValueError(f"metadata does not contain the required {shape_files.rel_path!r} column")
+    ready = metadata[shape_files.rel_path].eq(True)
     if not args.recompute_finished and ss_rel_path in metadata:
         ready &= ~metadata[ss_rel_path].eq(True)
     sha256s = metadata.loc[ready, "sha256"].astype(str).drop_duplicates()
@@ -265,7 +248,7 @@ def main() -> None:
                 "perturbation_rad_std": args.perturbation_rad_std,
                 "seed": args.seed,
             },
-            resources={"raw_files": raw_files, "device": device},
+            resources={"shape_files": shape_files, "device": device},
         ),
         Stage(
             "voxelize sparse structure",
