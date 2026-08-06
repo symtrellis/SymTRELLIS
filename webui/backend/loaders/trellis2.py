@@ -28,7 +28,7 @@ IMAGE_COND_MODEL = "facebook/dinov3-vitl16-pretrain-lvd1689m"
 REMBG_MODEL = "briaai/RMBG-2.0"
 
 SYMTRELLIS_REPO = "symtrellis/SymTRELLIS"
-SPARSE_STRUCTURE_MAPPER = "trellis2_sparse_structure_neighbor_graph_finetune"
+SPARSE_STRUCTURE_MAPPER = "trellis2/sparse_structure/swin3d/legacy"
 SHAPE_MAPPER = "trellis2_shape_neighbor_graph_finetune"
 
 
