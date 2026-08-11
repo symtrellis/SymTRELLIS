@@ -214,6 +214,28 @@ def coefficient_noise_rescale(
     return noise_symm * scale
 
 
+# TODO: Move transposed_project back to SymmetryProjector when the runtime image includes the updated package.
+def transposed_project(
+    projector: SymmetryProjector,
+    feats: torch.Tensor,
+    self_include: bool,
+) -> torch.Tensor:
+    """Apply the transpose of the complete symmetry projection."""
+    counts_dst = projector.counts_dst.unsqueeze(1)
+    if self_include:
+        weight_inv = 1.0 / (counts_dst + 1.0)
+    else:
+        weight_inv = 1.0 / counts_dst.clamp_min(1.0)
+
+    weighted_feats = feats * weight_inv
+    feats_dst = weighted_feats[projector.rows_dst]
+    feats_src = projector.coeff.apply_transposed(feats_dst)
+
+    projected_feats = weighted_feats.clone() if self_include else torch.zeros_like(weighted_feats)
+    projected_feats.index_add_(0, projector.rows_src, feats_src)
+    return projected_feats
+
+
 def lanczos_noise_rescale(
     noise_symm: torch.Tensor,
     projector: SymmetryProjector,
@@ -238,9 +260,9 @@ def lanczos_noise_rescale(
         basis.append(vector)
 
         if std is None:
-            projected_transpose = projector.transposed_project(vector, self_include=self_include)
+            projected_transpose = transposed_project(projector, vector, self_include)
         else:
-            projected_transpose = projector.transposed_project(vector / std, self_include=self_include) * std
+            projected_transpose = transposed_project(projector, vector / std, self_include) * std
         work = (1.0 - symmetry_strength) * vector + symmetry_strength * projected_transpose
 
         if std is None:

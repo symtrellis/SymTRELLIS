@@ -352,26 +352,6 @@ class SymmetryProjector:
 
         return sum_feats / counts_dst.clamp_min(1.0)
 
-    def transposed_project(
-        self,
-        feats: torch.Tensor,
-        self_include: bool = False,
-    ) -> torch.Tensor:
-        """Apply the transpose of the complete symmetry projection."""
-        counts_dst = self.counts_dst.unsqueeze(1)
-        if self_include:
-            weight_inv = 1.0 / (counts_dst + 1.0)
-        else:
-            weight_inv = 1.0 / counts_dst.clamp_min(1.0)
-
-        weighted_feats = feats * weight_inv
-        feats_dst = weighted_feats[self.rows_dst]
-        feats_src = self.coeff.apply_transposed(feats_dst)
-
-        projected_feats = weighted_feats.clone() if self_include else torch.zeros_like(weighted_feats)
-        projected_feats.index_add_(0, self.rows_src, feats_src)
-        return projected_feats
-
     @torch.no_grad()
     def least_square_project(
         self,
