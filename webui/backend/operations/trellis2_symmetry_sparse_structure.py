@@ -227,7 +227,7 @@ class Trellis2SymmetrySparseStructure(Operation):
                 strength=symmetry_projection_strength,
                 interval=symmetry_projection_duration,
                 symmetrize_target="x_start",
-                rescale=1.0,
+                rescale=0.0,
             )
 
             flow_solver = EulerSolver()

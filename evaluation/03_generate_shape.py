@@ -246,7 +246,8 @@ def main() -> None:
     parser.add_argument("--mapper-path", required=True)
     parser.add_argument("--symmetry-prediction-folder")
     parser.add_argument("--noise-strength", type=float, default=0.5)
-    parser.add_argument("--guidance-strength", type=float, default=0.4)
+    parser.add_argument("--noise-rescale-type", choices=("global", "voxel", "coefficient", "lanczos"), default="lanczos")
+    parser.add_argument("--guidance-strength", type=float, default=1.0)
     parser.add_argument("--guidance-duration", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=114514)
     parser.add_argument("--steps", type=int, default=32)
@@ -259,17 +260,18 @@ def main() -> None:
     mapper_tag = args.mapper_path.strip("/").replace("/", "_")
     sparse_structure_tag = args.sparse_structure_folder.rsplit("/", 1)[-1]
     symmetry_tag = args.symmetry_prediction_folder.rsplit("/", 1)[-1] if args.symmetry_prediction_folder else "gt"
-    experiment_name = "_".join(
-        [
-            f"shape_s{args.seed}",
-            f"ns{args.noise_strength}",
-            f"gs{args.guidance_strength}",
-            f"gd{args.guidance_duration}",
-            f"m_{mapper_tag}",
-            f"ss_{sparse_structure_tag}",
-            f"sym_{symmetry_tag}",
-        ]
-    )
+    experiment_parts = [
+        f"shape_s{args.seed}",
+        f"ns{args.noise_strength}",
+        f"gs{args.guidance_strength}",
+        f"gd{args.guidance_duration}",
+        f"m_{mapper_tag}",
+        f"ss_{sparse_structure_tag}",
+        f"sym_{symmetry_tag}",
+    ]
+    if args.noise_strength > 0.0:
+        experiment_parts.insert(2, f"nr_{args.noise_rescale_type}")
+    experiment_name = "_".join(experiment_parts)
 
     condition_files = workspace.files(args.condition_folder)
     sparse_structure_files = workspace.files(args.sparse_structure_folder)
@@ -310,6 +312,7 @@ def main() -> None:
         noise_sampler = TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(
             sampler=noise_sampler,
             symmetry_strength=args.noise_strength,
+            rescale_type=args.noise_rescale_type,
         )
 
     predictor = ClassifierFreeGuidanceWrapper(
@@ -324,7 +327,7 @@ def main() -> None:
             strength=args.guidance_strength,
             interval=(0.0, args.guidance_duration),
             symmetrize_target="x_start",
-            rescale=1.0,
+            rescale=0.0,
         )
 
     solver = EulerSolver()

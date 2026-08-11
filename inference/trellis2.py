@@ -22,6 +22,7 @@ from trimesh.visual import TextureVisuals
 from trimesh.visual.material import PBRMaterial
 
 from symtrellis.flow import AffineFlowStep, BaseFlowPredictor, BaseInitialNoiseSampler, SymmetryProjectionNoiseSampler
+from symtrellis.mapper import SymmetryProjector
 
 # Official TRELLIS.2 sampler defaults expressed in SymTRELLIS flow/CFG convention.
 TRELLIS2_SPARSE_STRUCTURE_STEPS = 12
@@ -29,6 +30,8 @@ TRELLIS2_SPARSE_STRUCTURE_RESCALE_T = 5.0
 TRELLIS2_SPARSE_STRUCTURE_CFG_STRENGTH = 7.5
 TRELLIS2_SPARSE_STRUCTURE_CFG_INTERVAL = (0.0, 0.4)
 TRELLIS2_SPARSE_STRUCTURE_CFG_RESCALE = 0.7
+TRELLIS2_NOISE_LANCZOS_STEPS = 24
+TRELLIS2_NOISE_SPECTRAL_FLOOR = 0.5
 
 TRELLIS2_SHAPE_LATENT_STEPS = 12
 TRELLIS2_SHAPE_LATENT_RESCALE_T = 3.0
@@ -154,16 +157,146 @@ class TRELLIS2SparseStructureLatentNoiseSampler(BaseInitialNoiseSampler):
         return noise
 
 
+def coefficient_noise_rescale(
+    noise_symm: torch.Tensor,
+    projector: SymmetryProjector,
+    symmetry_strength: float,
+    self_include: bool,
+    std: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Restore the expected row norm derived from the mixed projection coefficients."""
+    coeff = projector.coeff
+    source_rows = projector.rows_src[coeff.e_ids_src]
+    destination_rows = projector.rows_dst[coeff.e_ids_dst]
+    edge_pair_ids = destination_rows * projector.num_rows + source_rows
+    diagonal_pair_ids = torch.arange(projector.num_rows, device=noise_symm.device) * (projector.num_rows + 1)
+    pair_ids, pair_inverse = torch.unique(
+        torch.cat([edge_pair_ids, diagonal_pair_ids]),
+        sorted=True,
+        return_inverse=True,
+    )
+    edge_pair_inverse = pair_inverse[: edge_pair_ids.shape[0]]
+
+    pair_weights = noise_symm.new_zeros(pair_ids.shape[0])
+    pair_weights.index_add_(0, edge_pair_inverse, coeff.w)
+    pair_lowrank = noise_symm.new_zeros(pair_ids.shape[0], coeff.s.shape[1])
+    pair_lowrank.index_add_(0, edge_pair_inverse, coeff.w[:, None] * coeff.s)
+
+    pair_destination_rows = torch.div(pair_ids, projector.num_rows, rounding_mode="floor")
+    pair_source_rows = pair_ids.remainder(projector.num_rows)
+    counts = projector.counts_dst[pair_destination_rows]
+    denominator = counts + 1.0 if self_include else counts.clamp_min(1.0)
+
+    identity_coeff = symmetry_strength * pair_weights / denominator
+    lowrank_coeff = symmetry_strength * pair_lowrank / denominator[:, None]
+    diagonal_pairs = pair_destination_rows == pair_source_rows
+    identity_coeff[diagonal_pairs] += 1.0 - symmetry_strength
+    if self_include:
+        identity_coeff[diagonal_pairs] += symmetry_strength / denominator[diagonal_pairs]
+
+    left = coeff.Ut.T
+    right = coeff.V.T
+    if std is not None:
+        channel_std = std.reshape(-1)
+        left = channel_std[:, None] * left
+        right = right / channel_std[None, :]
+
+    trace_basis = (right * left.T).sum(dim=1)
+    lowrank_gram = (left.T @ left) * (right @ right.T)
+    lowrank_trace = lowrank_coeff @ trace_basis
+    lowrank_norm = ((lowrank_coeff @ lowrank_gram) * lowrank_coeff).sum(dim=1)
+    block_norm = identity_coeff.square() * noise_symm.shape[1] + 2.0 * identity_coeff * lowrank_trace + lowrank_norm
+
+    output_variance = noise_symm.new_zeros(projector.num_rows)
+    output_variance.index_add_(0, pair_destination_rows, block_norm)
+    output_variance = output_variance / noise_symm.shape[1]
+    scale = output_variance.clamp_min(torch.finfo(noise_symm.dtype).eps).rsqrt()[:, None]
+    return noise_symm * scale
+
+
+def lanczos_noise_rescale(
+    noise_symm: torch.Tensor,
+    projector: SymmetryProjector,
+    symmetry_strength: float,
+    self_include: bool,
+    std: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Apply the clipped spectral correction of the mixed projection operator."""
+    noise_norm = noise_symm.norm()
+    if noise_norm == 0:
+        return noise_symm
+
+    basis = []
+    diagonal = []
+    off_diagonal = []
+    previous_vector = torch.zeros_like(noise_symm)
+    vector = noise_symm / noise_norm
+    previous_beta = noise_symm.new_zeros(())
+    eps = torch.finfo(noise_symm.dtype).eps
+
+    for iteration in range(TRELLIS2_NOISE_LANCZOS_STEPS):
+        basis.append(vector)
+
+        if std is None:
+            projected_transpose = projector.transposed_project(vector, self_include=self_include)
+        else:
+            projected_transpose = projector.transposed_project(vector / std, self_include=self_include) * std
+        work = (1.0 - symmetry_strength) * vector + symmetry_strength * projected_transpose
+
+        if std is None:
+            projected = projector.forward_project(work, self_include=self_include)
+        else:
+            projected = projector.forward_project(work * std, self_include=self_include) / std
+        work = (1.0 - symmetry_strength) * work + symmetry_strength * projected
+
+        work = work - previous_beta * previous_vector
+        alpha = torch.sum(vector * work)
+        diagonal.append(alpha)
+        work = work - alpha * vector
+        for basis_vector in basis:
+            work = work - torch.sum(basis_vector * work) * basis_vector
+
+        if iteration + 1 == TRELLIS2_NOISE_LANCZOS_STEPS:
+            break
+
+        beta = work.norm()
+        if beta <= eps:
+            break
+        off_diagonal.append(beta)
+        previous_vector = vector
+        vector = work / beta
+        previous_beta = beta
+
+    tridiagonal = torch.diag(torch.stack(diagonal).float())
+    if off_diagonal:
+        off_diagonal_tensor = torch.stack(off_diagonal).float()
+        tridiagonal.diagonal(1).copy_(off_diagonal_tensor)
+        tridiagonal.diagonal(-1).copy_(off_diagonal_tensor)
+
+    eigenvalues, eigenvectors = torch.linalg.eigh(tridiagonal)
+    singular_values = eigenvalues.clamp_min(0.0).sqrt()
+    threshold = max(1.0 - symmetry_strength, TRELLIS2_NOISE_SPECTRAL_FLOOR)
+    multipliers = torch.zeros_like(singular_values)
+    nonzero = singular_values > torch.finfo(singular_values.dtype).eps
+    multipliers[nonzero] = singular_values[nonzero].clamp(threshold, 1.0) / singular_values[nonzero]
+    spectral_weights = eigenvectors @ (multipliers * eigenvectors[0])
+
+    basis_tensor = torch.stack(basis)
+    weight_shape = (spectral_weights.shape[0],) + (1,) * noise_symm.ndim
+    corrected = (basis_tensor * spectral_weights.to(noise_symm.dtype).reshape(weight_shape)).sum(dim=0)
+    return corrected * noise_norm
+
+
 class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNoiseSampler):
 
     def __init__(
         self,
         sampler: BaseInitialNoiseSampler,
         symmetry_strength: float = 1.0,
-        rescale_type: str = "global",
+        rescale_type: str = "lanczos",
         rescale_strength: float = 1.0,
     ) -> None:
-        assert rescale_type in ("global", "voxel")
+        assert rescale_type in ("global", "voxel", "coefficient", "lanczos")
 
         super().__init__(
             sampler=sampler,
@@ -200,13 +333,32 @@ class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNo
             symm_norm = noise_symm.flatten(1).norm(dim=1)
             scale = native_norm / symm_norm.clamp_min(torch.finfo(noise_native.dtype).eps)
             scale = scale[:, None, None, None, None]
-        else:
+            noise_rescaled = noise_symm * scale
+        elif self.rescale_type == "voxel":
             scale = noise_native.norm(dim=1, keepdim=True) / noise_symm.norm(
                 dim=1,
                 keepdim=True,
             ).clamp_min(torch.finfo(noise_native.dtype).eps)
+            noise_rescaled = noise_symm * scale
+        elif self.rescale_type == "coefficient":
+            noise_rescaled = to_original_view(
+                coefficient_noise_rescale(
+                    noise_symm=to_sparse_view(noise_symm),
+                    projector=projector,
+                    symmetry_strength=self.symmetry_strength,
+                    self_include=self_include,
+                )
+            )
+        else:
+            noise_rescaled = to_original_view(
+                lanczos_noise_rescale(
+                    noise_symm=to_sparse_view(noise_symm),
+                    projector=projector,
+                    symmetry_strength=self.symmetry_strength,
+                    self_include=self_include,
+                )
+            )
 
-        noise_rescaled = noise_symm * scale
         return self.rescale_strength * noise_rescaled + (1.0 - self.rescale_strength) * noise_symm
 
 
@@ -489,10 +641,10 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
         self,
         sampler: BaseInitialNoiseSampler,
         symmetry_strength: float = 1.0,
-        rescale_type: str = "global",
+        rescale_type: str = "lanczos",
         rescale_strength: float = 1.0,
     ) -> None:
-        assert rescale_type in ("global", "voxel")
+        assert rescale_type in ("global", "voxel", "coefficient", "lanczos")
 
         super().__init__(
             sampler=sampler,
@@ -543,7 +695,8 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
 
             scale = native_norm.sqrt() / symm_norm.sqrt().clamp_min(torch.finfo(noise_symm.dtype).eps)
             scale = scale[batch_indices, None]
-        else:
+            noise_rescaled = noise_symm * scale
+        elif self.rescale_type == "voxel":
             scale = noise_native.feats.norm(
                 dim=1,
                 keepdim=True,
@@ -551,8 +704,24 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
                 dim=1,
                 keepdim=True,
             ).clamp_min(torch.finfo(noise_symm.dtype).eps)
+            noise_rescaled = noise_symm * scale
+        elif self.rescale_type == "coefficient":
+            noise_rescaled = coefficient_noise_rescale(
+                noise_symm=noise_symm,
+                projector=projector,
+                symmetry_strength=self.symmetry_strength,
+                self_include=self_include,
+                std=std,
+            )
+        else:
+            noise_rescaled = lanczos_noise_rescale(
+                noise_symm=noise_symm,
+                projector=projector,
+                symmetry_strength=self.symmetry_strength,
+                self_include=self_include,
+                std=std,
+            )
 
-        noise_rescaled = noise_symm * scale
         noise = self.rescale_strength * noise_rescaled + (1.0 - self.rescale_strength) * noise_symm
         return noise_native.replace(noise)
 

@@ -35,26 +35,27 @@ def load_mesh(mesh_path, device):
     vertices = np.asarray(mesh.vertices).copy()
     faces = np.asarray(mesh.faces).copy()
 
+    vertices = torch.from_numpy(vertices).to(device=device, dtype=torch.float32)
+    faces = torch.from_numpy(faces).to(device=device, dtype=torch.int64)
+    vertices, faces = clean_mesh(vertices, faces)
+
     if len(faces) > MESH_MAX_FACES:
         cuda_mesh = cumesh.CuMesh()
         cuda_mesh.init(
-            torch.from_numpy(vertices).to(device=device, dtype=torch.float32).contiguous(),
-            torch.from_numpy(faces).to(device=device, dtype=torch.int32).contiguous(),
+            vertices.contiguous(),
+            faces.to(dtype=torch.int32).contiguous(),
         )
         cuda_mesh.simplify(MESH_MAX_FACES, verbose=False)
         vertices, faces = cuda_mesh.read()
-        vertices = vertices.cpu().numpy().copy()
-        faces = faces.cpu().numpy().copy()
+        faces = faces.to(dtype=torch.int64)
+        vertices, faces = clean_mesh(vertices, faces)
 
     vertices = vertices[:, [0, 2, 1]]
     vertices[:, 1] *= -1
-
-    vertices = torch.from_numpy(vertices).to(device=device, dtype=torch.float32)
-    faces = torch.from_numpy(faces).to(device=device, dtype=torch.int64)
     return vertices, faces
 
 
-def valid_mesh_triangles(vertices, faces):
+def clean_mesh(vertices, faces):
     triangles = vertices[faces]
     double_areas = torch.linalg.vector_norm(
         torch.cross(
@@ -65,11 +66,21 @@ def valid_mesh_triangles(vertices, faces):
         dim=1,
     )
     valid = torch.isfinite(triangles).all(dim=(1, 2)) & (double_areas > 0)
-    return triangles[valid].contiguous()
+    faces = faces[valid]
+
+    if len(faces) == 0:
+        return vertices[:0], faces
+
+    vertex_ids, faces = torch.unique(
+        faces.reshape(-1),
+        sorted=True,
+        return_inverse=True,
+    )
+    return vertices[vertex_ids], faces.reshape(-1, 3)
 
 
 def mesh_surface_radius(vertices, faces):
-    triangles = valid_mesh_triangles(vertices, faces)
+    triangles = vertices[faces].contiguous()
     face_areas = 0.5 * torch.linalg.vector_norm(
         torch.cross(
             triangles[:, 1] - triangles[:, 0],
@@ -139,8 +150,8 @@ def point_to_mesh_squared_distance(points, target_triangles):
 def mesh_surface_chamfer_distances(gt_vertices, gt_faces, prediction_vertices, prediction_faces):
     gt_mesh = Meshes(verts=[gt_vertices], faces=[gt_faces])
     prediction_mesh = Meshes(verts=[prediction_vertices], faces=[prediction_faces])
-    gt_triangles = valid_mesh_triangles(gt_vertices, gt_faces)
-    prediction_triangles = valid_mesh_triangles(prediction_vertices, prediction_faces)
+    gt_triangles = gt_vertices[gt_faces].contiguous()
+    prediction_triangles = prediction_vertices[prediction_faces].contiguous()
     gt_to_prediction_chunks = []
     prediction_to_gt_chunks = []
 
@@ -157,7 +168,7 @@ def mesh_surface_chamfer_distances(gt_vertices, gt_faces, prediction_vertices, p
 
 def mesh_surface_symmetry_distances(vertices, faces, transforms, translations):
     mesh = Meshes(verts=[vertices], faces=[faces])
-    target_triangles = valid_mesh_triangles(vertices, faces)
+    target_triangles = vertices[faces].contiguous()
     distance_chunks = []
 
     for start in range(0, SCORE_NUM_SAMPLES, SCORE_BATCH_SIZE):
@@ -230,6 +241,11 @@ def calculate_score(
 
     device = torch.device("cuda:0")
     prediction_vertices, prediction_faces = load_mesh(prediction_path, device)
+    if len(prediction_faces) == 0:
+        result["fail_reason"] = "prediction mesh has no valid triangles"
+        output_path.write_text(json.dumps(result, indent=4), encoding="utf-8")
+        return {"idx": idx, output_files.rel_path: True}
+
     detection = detect_mesh_symmetry(
         verts=prediction_vertices,
         faces=prediction_faces,
@@ -315,6 +331,11 @@ def calculate_score(
         symmetry_axis=symmetry_axis,
     )
     gt_vertices, gt_faces = load_mesh(ground_truth_path, device)
+    if len(gt_faces) == 0:
+        result["fail_reason"] = "ground-truth mesh has no valid triangles"
+        output_path.write_text(json.dumps(result, indent=4), encoding="utf-8")
+        return {"idx": idx, output_files.rel_path: True}
+
     prediction_radius = mesh_surface_radius(prediction_vertices, prediction_faces)
     gt_radius = mesh_surface_radius(gt_vertices, gt_faces)
     initial_scale = gt_radius / prediction_radius

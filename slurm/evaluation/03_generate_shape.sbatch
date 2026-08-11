@@ -22,7 +22,8 @@ SIF="$HOME/symtrellis.sif"
 
 SYMMETRY_PREDICTION_FOLDER="${SYMMETRY_PREDICTION_FOLDER:-}"
 NOISE_STRENGTH="${NOISE_STRENGTH:-0.5}"
-GUIDANCE_STRENGTH="${GUIDANCE_STRENGTH:-0.4}"
+NOISE_RESCALE_TYPE="${NOISE_RESCALE_TYPE:-lanczos}"
+GUIDANCE_STRENGTH="${GUIDANCE_STRENGTH:-1.0}"
 GUIDANCE_DURATION="${GUIDANCE_DURATION:-0.3}"
 SEED="${SEED:-114514}"
 STEPS="${STEPS:-32}"
@@ -56,6 +57,7 @@ apptainer exec --nv \
     --mapper-path "$MAPPER_PATH" \
     --symmetry-prediction-folder "$SYMMETRY_PREDICTION_FOLDER" \
     --noise-strength "$NOISE_STRENGTH" \
+    --noise-rescale-type "$NOISE_RESCALE_TYPE" \
     --guidance-strength "$GUIDANCE_STRENGTH" \
     --guidance-duration "$GUIDANCE_DURATION" \
     --seed "$SEED" \
