@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 import trimesh
-from pytorch3d.loss.point_mesh_distance import point_face_distance
+from kaolin.metrics.trianglemesh import point_to_mesh_distance
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.structures import Meshes
 
@@ -52,6 +52,40 @@ def load_mesh(mesh_path, device):
     vertices = torch.from_numpy(vertices).to(device=device, dtype=torch.float32)
     faces = torch.from_numpy(faces).to(device=device, dtype=torch.int64)
     return vertices, faces
+
+
+def valid_mesh_triangles(vertices, faces):
+    triangles = vertices[faces]
+    double_areas = torch.linalg.vector_norm(
+        torch.cross(
+            triangles[:, 1] - triangles[:, 0],
+            triangles[:, 2] - triangles[:, 0],
+            dim=1,
+        ),
+        dim=1,
+    )
+    valid = torch.isfinite(triangles).all(dim=(1, 2)) & (double_areas > 0)
+    return triangles[valid].contiguous()
+
+
+def mesh_surface_radius(vertices, faces):
+    triangles = valid_mesh_triangles(vertices, faces)
+    face_areas = 0.5 * torch.linalg.vector_norm(
+        torch.cross(
+            triangles[:, 1] - triangles[:, 0],
+            triangles[:, 2] - triangles[:, 0],
+            dim=1,
+        ),
+        dim=1,
+    )
+    total_area = face_areas.sum()
+
+    face_centers = triangles.mean(dim=1)
+    surface_center = (face_areas[:, None] * face_centers).sum(dim=0) / total_area
+    face_second_moments = (triangles.square().sum(dim=(1, 2)) + (triangles[:, 0] * triangles[:, 1]).sum(dim=1) + (triangles[:, 0] * triangles[:, 2]).sum(dim=1) + (triangles[:, 1] * triangles[:, 2]).sum(dim=1)) / 6.0
+    surface_second_moment = (face_areas * face_second_moments).sum() / total_area
+    radius_squared = (surface_second_moment - surface_center.square().sum()).clamp_min(0.0)
+    return radius_squared.sqrt()
 
 
 def align_meshes(
@@ -98,26 +132,15 @@ def align_meshes(
     return rotations, translations, scales, rmse
 
 
-def point_to_mesh_squared_distance(points, target_mesh):
-    vertices = target_mesh.verts_packed()
-    faces = target_mesh.faces_packed()
-    triangles = vertices[faces].contiguous()
-    points_first_index = torch.tensor([0], dtype=torch.long, device=points.device)
-    triangles_first_index = torch.tensor([0], dtype=torch.long, device=points.device)
-
-    return point_face_distance(
-        points,
-        points_first_index,
-        triangles,
-        triangles_first_index,
-        points.shape[0],
-        1e-12,
-    )
+def point_to_mesh_squared_distance(points, target_triangles):
+    return point_to_mesh_distance(points[None], target_triangles[None])[0][0]
 
 
 def mesh_surface_chamfer_distances(gt_vertices, gt_faces, prediction_vertices, prediction_faces):
     gt_mesh = Meshes(verts=[gt_vertices], faces=[gt_faces])
     prediction_mesh = Meshes(verts=[prediction_vertices], faces=[prediction_faces])
+    gt_triangles = valid_mesh_triangles(gt_vertices, gt_faces)
+    prediction_triangles = valid_mesh_triangles(prediction_vertices, prediction_faces)
     gt_to_prediction_chunks = []
     prediction_to_gt_chunks = []
 
@@ -126,14 +149,15 @@ def mesh_surface_chamfer_distances(gt_vertices, gt_faces, prediction_vertices, p
         gt_samples = sample_points_from_meshes(gt_mesh, num_samples=batch_size)[0]
         prediction_samples = sample_points_from_meshes(prediction_mesh, num_samples=batch_size)[0]
 
-        gt_to_prediction_chunks.append(point_to_mesh_squared_distance(gt_samples, prediction_mesh).sqrt())
-        prediction_to_gt_chunks.append(point_to_mesh_squared_distance(prediction_samples, gt_mesh).sqrt())
+        gt_to_prediction_chunks.append(point_to_mesh_squared_distance(gt_samples, prediction_triangles).sqrt())
+        prediction_to_gt_chunks.append(point_to_mesh_squared_distance(prediction_samples, gt_triangles).sqrt())
 
     return torch.cat(gt_to_prediction_chunks), torch.cat(prediction_to_gt_chunks)
 
 
 def mesh_surface_symmetry_distances(vertices, faces, transforms, translations):
     mesh = Meshes(verts=[vertices], faces=[faces])
+    target_triangles = valid_mesh_triangles(vertices, faces)
     distance_chunks = []
 
     for start in range(0, SCORE_NUM_SAMPLES, SCORE_BATCH_SIZE):
@@ -143,7 +167,7 @@ def mesh_surface_symmetry_distances(vertices, faces, transforms, translations):
 
         for transform, translation in zip(transforms, translations):
             transformed_samples = samples @ transform.T + translation[None]
-            transform_distances.append(point_to_mesh_squared_distance(transformed_samples, mesh).sqrt())
+            transform_distances.append(point_to_mesh_squared_distance(transformed_samples, target_triangles).sqrt())
 
         distance_chunks.append(torch.stack(transform_distances, dim=1))
 
@@ -291,10 +315,8 @@ def calculate_score(
         symmetry_axis=symmetry_axis,
     )
     gt_vertices, gt_faces = load_mesh(ground_truth_path, device)
-    prediction_center = prediction_vertices.mean(dim=0)
-    gt_center = gt_vertices.mean(dim=0)
-    prediction_radius = (prediction_vertices - prediction_center).norm(dim=1).mean().clamp_min(1e-6)
-    gt_radius = (gt_vertices - gt_center).norm(dim=1).mean().clamp_min(1e-6)
+    prediction_radius = mesh_surface_radius(prediction_vertices, prediction_faces)
+    gt_radius = mesh_surface_radius(gt_vertices, gt_faces)
     initial_scale = gt_radius / prediction_radius
 
     rotations, translations, scales, rmse = align_meshes(
