@@ -22,7 +22,7 @@ declare -Ar MATRIX=(
         pytorch3d-0.7.9-cp310-cp310-linux_x86_64.whl
         sam3d_objects-0.0.1-py3-none-any.whl
         spconv_cu121-2.4.1-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-        symtrellis-0.0.1-cp310-cp310-linux_x86_64.whl
+        symtrellis-1.0.0-cp310-cp310-linux_x86_64.whl
         trellis-0.0.1-py3-none-any.whl
         trellis2-0.0.1-py3-none-any.whl
         utils3d-0.0.2-py3-none-any.whl
@@ -45,7 +45,7 @@ declare -Ar MATRIX=(
         pytorch3d-0.7.9-cp311-cp311-linux_x86_64.whl
         sam3d_objects-0.0.1-py3-none-any.whl
         spconv_cu128-2.4.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-        symtrellis-0.0.1-cp311-cp311-linux_x86_64.whl
+        symtrellis-1.0.0-cp311-cp311-linux_x86_64.whl
         trellis-0.0.1-py3-none-any.whl
         trellis2-0.0.1-py3-none-any.whl
         utils3d-0.0.2-py3-none-any.whl
@@ -68,7 +68,7 @@ declare -Ar MATRIX=(
         pytorch3d-0.7.9-cp312-cp312-linux_x86_64.whl
         sam3d_objects-0.0.1-py3-none-any.whl
         spconv_cu128-2.4.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-        symtrellis-0.0.1-cp312-cp312-linux_x86_64.whl
+        symtrellis-1.0.0-cp312-cp312-linux_x86_64.whl
         trellis-0.0.1-py3-none-any.whl
         trellis2-0.0.1-py3-none-any.whl
         utils3d-0.0.2-py3-none-any.whl
@@ -91,7 +91,7 @@ declare -Ar MATRIX=(
         pytorch3d-0.7.9-cp312-cp312-linux_x86_64.whl
         sam3d_objects-0.0.1-py3-none-any.whl
         spconv_cu130-2.4.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-        symtrellis-0.0.1-cp312-cp312-linux_x86_64.whl
+        symtrellis-1.0.0-cp312-cp312-linux_x86_64.whl
         trellis-0.0.1-py3-none-any.whl
         trellis2-0.0.1-py3-none-any.whl
         utils3d-0.0.2-py3-none-any.whl

@@ -13,7 +13,7 @@ os.environ.setdefault("MAX_JOBS", str(os.cpu_count() or 1))
 
 setup(
     name="symtrellis",
-    version="0.0.1",
+    version="1.0.0",
     packages=find_packages(
         include=[
             "symtrellis",

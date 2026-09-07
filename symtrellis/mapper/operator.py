@@ -352,6 +352,38 @@ class SymmetryProjector:
 
         return sum_feats / counts_dst.clamp_min(1.0)
 
+    def transposed_project(
+        self,
+        feats: torch.Tensor,
+        self_include: bool = False,
+    ) -> torch.Tensor:
+        """
+        Apply the transpose of the complete symmetry projection.
+
+        Args:
+          feats: [N, C] original sparse feature rows.
+          self_include: if True, include the transposed self contribution.
+
+        Returns:
+          projected_feats: [N, C].
+        """
+        # Apply the forward projection's row-averaging weights.
+        counts_dst = self.counts_dst.unsqueeze(1)
+        if self_include:
+            weight_inv = 1.0 / (counts_dst + 1.0)
+        else:
+            weight_inv = 1.0 / counts_dst.clamp_min(1.0)
+
+        # Gather dst entries and map them back to relation-expanded src entries.
+        weighted_feats = feats * weight_inv
+        feats_dst = weighted_feats[self.rows_dst]
+        feats_src = self.coeff.apply_transposed(feats_dst)
+
+        # Scatter/add src entries back to the original rows.
+        projected_feats = weighted_feats.clone() if self_include else torch.zeros_like(weighted_feats)
+        projected_feats.index_add_(0, self.rows_src, feats_src)
+        return projected_feats
+
     @torch.no_grad()
     def least_square_project(
         self,
