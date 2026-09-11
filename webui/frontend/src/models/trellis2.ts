@@ -128,12 +128,22 @@ const commonGenerationDefaults: CommonGenerationParams = {
 };
 
 const symmetrySparseStructureProjectionDefaults: SymmetryProjectionParams = {
+  noiseLanczosSteps: 24,
+  noiseRescaleStrength: 1.0,
+  noiseRescaleType: 'lanczos',
+  noiseSpectralCeiling: 1.0,
+  noiseSpectralFloor: 0.5,
   noiseSymmetryProjectionStrength: 0.5,
   symmetryProjectionDuration: [0, 0.3],
   symmetryProjectionStrength: 1.0,
 };
 
 const symmetryShapeProjectionDefaults: SymmetryProjectionParams = {
+  noiseLanczosSteps: 24,
+  noiseRescaleStrength: 1.0,
+  noiseRescaleType: 'lanczos',
+  noiseSpectralCeiling: 1.0,
+  noiseSpectralFloor: 0.5,
   noiseSymmetryProjectionStrength: 0.5,
   symmetryProjectionDuration: [0, 0.3],
   symmetryProjectionStrength: 1.0,

@@ -1,6 +1,7 @@
 import type {
   CommonGenerationParams,
   GenerationStatus,
+  NoiseRescaleType,
   SymmetryProjectionParams,
 } from '../state/generation';
 import { DurationRangeControl, IntegerStepperField } from './controls';
@@ -8,6 +9,7 @@ import { DurationRangeControl, IntegerStepperField } from './controls';
 type NumberFieldProps = {
   disabled?: boolean;
   label: string;
+  max?: number;
   min?: number;
   onChange: (value: number) => void;
   step?: number;
@@ -49,6 +51,7 @@ type GenerationActionsProps = {
 export function NumberField({
   disabled = false,
   label,
+  max,
   min,
   onChange,
   step,
@@ -59,6 +62,7 @@ export function NumberField({
       <span className="field-label">{label}</span>
       <input
         disabled={disabled}
+        max={max}
         min={min}
         onChange={(event) => onChange(Number(event.currentTarget.value))}
         step={step}
@@ -79,10 +83,67 @@ export function SymmetryGenerationParameters({
       <NumberField
         disabled={disabled}
         label="noise symmetry projection strength"
+        max={1}
+        min={0}
         onChange={(noiseSymmetryProjectionStrength) => onParamsChange({ noiseSymmetryProjectionStrength })}
         step={0.01}
         value={params.noiseSymmetryProjectionStrength}
       />
+      <label className="field-row generation-field-row">
+        <span className="field-label">noise rescaling method</span>
+        <select
+          className="generation-select"
+          disabled={disabled}
+          onChange={(event) =>
+            onParamsChange({
+              noiseRescaleType: event.currentTarget.value as NoiseRescaleType,
+            })
+          }
+          value={params.noiseRescaleType}
+        >
+          <option value="global">global</option>
+          <option value="voxel">voxel</option>
+          <option value="coefficient">coefficient</option>
+          <option value="lanczos">lanczos</option>
+        </select>
+      </label>
+      <NumberField
+        disabled={disabled}
+        label="noise rescaling strength"
+        max={1}
+        min={0}
+        onChange={(noiseRescaleStrength) => onParamsChange({ noiseRescaleStrength })}
+        step={0.01}
+        value={params.noiseRescaleStrength}
+      />
+      {params.noiseRescaleType === 'lanczos' ? (
+        <>
+          <IntegerStepperField
+            disabled={disabled}
+            label="Lanczos steps"
+            min={1}
+            onChange={(noiseLanczosSteps) => onParamsChange({ noiseLanczosSteps })}
+            value={params.noiseLanczosSteps}
+          />
+          <NumberField
+            disabled={disabled}
+            label="spectral floor"
+            max={1}
+            min={0}
+            onChange={(noiseSpectralFloor) => onParamsChange({ noiseSpectralFloor })}
+            step={0.01}
+            value={params.noiseSpectralFloor}
+          />
+          <NumberField
+            disabled={disabled}
+            label="spectral ceiling"
+            min={1}
+            onChange={(noiseSpectralCeiling) => onParamsChange({ noiseSpectralCeiling })}
+            step={0.01}
+            value={params.noiseSpectralCeiling}
+          />
+        </>
+      ) : null}
       <NumberField
         disabled={disabled}
         label="symmetry projection strength"

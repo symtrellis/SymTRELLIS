@@ -32,6 +32,7 @@ TRELLIS2_SPARSE_STRUCTURE_CFG_INTERVAL = (0.0, 0.4)
 TRELLIS2_SPARSE_STRUCTURE_CFG_RESCALE = 0.7
 TRELLIS2_NOISE_LANCZOS_STEPS = 24
 TRELLIS2_NOISE_SPECTRAL_FLOOR = 0.5
+TRELLIS2_NOISE_SPECTRAL_CEILING = 1.0
 
 TRELLIS2_SHAPE_LATENT_STEPS = 12
 TRELLIS2_SHAPE_LATENT_RESCALE_T = 3.0
@@ -219,6 +220,9 @@ def lanczos_noise_rescale(
     projector: SymmetryProjector,
     symmetry_strength: float,
     self_include: bool,
+    lanczos_steps: int,
+    spectral_floor: float,
+    spectral_ceiling: float,
     std: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Apply the clipped spectral correction of the mixed projection operator."""
@@ -234,7 +238,7 @@ def lanczos_noise_rescale(
     previous_beta = noise_symm.new_zeros(())
     eps = torch.finfo(noise_symm.dtype).eps
 
-    for iteration in range(TRELLIS2_NOISE_LANCZOS_STEPS):
+    for iteration in range(lanczos_steps):
         basis.append(vector)
 
         if std is None:
@@ -262,7 +266,7 @@ def lanczos_noise_rescale(
         for basis_vector in basis:
             work = work - torch.sum(basis_vector * work) * basis_vector
 
-        if iteration + 1 == TRELLIS2_NOISE_LANCZOS_STEPS:
+        if iteration + 1 == lanczos_steps:
             break
 
         beta = work.norm()
@@ -281,10 +285,13 @@ def lanczos_noise_rescale(
 
     eigenvalues, eigenvectors = torch.linalg.eigh(tridiagonal)
     singular_values = eigenvalues.clamp_min(0.0).sqrt()
-    threshold = max(1.0 - symmetry_strength, TRELLIS2_NOISE_SPECTRAL_FLOOR)
+    threshold = max(1.0 - symmetry_strength, spectral_floor)
     multipliers = torch.zeros_like(singular_values)
     nonzero = singular_values > torch.finfo(singular_values.dtype).eps
-    multipliers[nonzero] = singular_values[nonzero].clamp(threshold, 1.0) / singular_values[nonzero]
+    multipliers[nonzero] = (
+        singular_values[nonzero].clamp(threshold, spectral_ceiling)
+        / singular_values[nonzero]
+    )
     spectral_weights = eigenvectors @ (multipliers * eigenvectors[0])
 
     basis_tensor = torch.stack(basis)
@@ -301,6 +308,9 @@ class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNo
         symmetry_strength: float = 1.0,
         rescale_type: str = "lanczos",
         rescale_strength: float = 1.0,
+        lanczos_steps: int = TRELLIS2_NOISE_LANCZOS_STEPS,
+        spectral_floor: float = TRELLIS2_NOISE_SPECTRAL_FLOOR,
+        spectral_ceiling: float = TRELLIS2_NOISE_SPECTRAL_CEILING,
     ) -> None:
         assert rescale_type in ("global", "voxel", "coefficient", "lanczos")
 
@@ -310,6 +320,9 @@ class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNo
         )
         self.rescale_type = rescale_type
         self.rescale_strength = rescale_strength
+        self.lanczos_steps = lanczos_steps
+        self.spectral_floor = spectral_floor
+        self.spectral_ceiling = spectral_ceiling
 
     def sample(
         self,
@@ -353,6 +366,9 @@ class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNo
                     projector=projector,
                     symmetry_strength=self.symmetry_strength,
                     self_include=self_include,
+                    lanczos_steps=self.lanczos_steps,
+                    spectral_floor=self.spectral_floor,
+                    spectral_ceiling=self.spectral_ceiling,
                 )
             )
         else:
@@ -649,6 +665,9 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
         symmetry_strength: float = 1.0,
         rescale_type: str = "lanczos",
         rescale_strength: float = 1.0,
+        lanczos_steps: int = TRELLIS2_NOISE_LANCZOS_STEPS,
+        spectral_floor: float = TRELLIS2_NOISE_SPECTRAL_FLOOR,
+        spectral_ceiling: float = TRELLIS2_NOISE_SPECTRAL_CEILING,
     ) -> None:
         assert rescale_type in ("global", "voxel", "coefficient", "lanczos")
 
@@ -658,6 +677,9 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
         )
         self.rescale_type = rescale_type
         self.rescale_strength = rescale_strength
+        self.lanczos_steps = lanczos_steps
+        self.spectral_floor = spectral_floor
+        self.spectral_ceiling = spectral_ceiling
 
     def sample(
         self,
@@ -717,6 +739,9 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
                 projector=projector,
                 symmetry_strength=self.symmetry_strength,
                 self_include=self_include,
+                lanczos_steps=self.lanczos_steps,
+                spectral_floor=self.spectral_floor,
+                spectral_ceiling=self.spectral_ceiling,
                 std=std,
             )
         else:

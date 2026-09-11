@@ -15,6 +15,8 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from inference.trellis2 import TRELLIS2_NOISE_LANCZOS_STEPS
+
 from .coordinator import Coordinator, ExecutionRequest, GpuExecutionInput
 from .loaders.trellis2 import TRELLIS2Runtime
 from .operations import OperationContext, OperationResult
@@ -175,20 +177,33 @@ def gpu_duration(gpu_input: GpuExecutionInput, _progress: gradio.Progress) -> in
 
     steps = int(gpu_input.params["steps"])
     extra_steps = max(0, steps - 32)
+    extra_lanczos_duration = 0
+    if (
+        operation_id
+        in (
+            Trellis2SymmetrySparseStructure.operation_id,
+            Trellis2SymmetryShape.operation_id,
+        )
+        and gpu_input.params["noiseRescaleType"] == "lanczos"
+    ):
+        extra_lanczos_duration = max(
+            0,
+            int(gpu_input.params["noiseLanczosSteps"]) - TRELLIS2_NOISE_LANCZOS_STEPS,
+        )
 
     if operation_id in (
         Trellis2VanillaSparseStructure.operation_id,
         Trellis2SymmetrySparseStructure.operation_id,
     ):
-        return 24 + extra_steps
+        return 24 + extra_steps + extra_lanczos_duration
 
     if operation_id in (
         Trellis2VanillaShape.operation_id,
         Trellis2SymmetryShape.operation_id,
     ):
         if gpu_input.params["mode"] == "cascade":
-            return 105 + 2 * extra_steps
-        return 24 + extra_steps
+            return 105 + 2 * extra_steps + extra_lanczos_duration
+        return 24 + extra_steps + extra_lanczos_duration
 
     if operation_id == Trellis2Texture.operation_id:
         shape_record = gpu_input.inputs.records["shape"]

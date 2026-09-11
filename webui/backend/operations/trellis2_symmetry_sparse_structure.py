@@ -97,6 +97,11 @@ class Trellis2SymmetrySparseStructure(Operation):
         cfg_rescale = float(params["cfgRescale"])
 
         noise_symmetry_projection_strength = float(params["noiseSymmetryProjectionStrength"])
+        noise_rescale_type = str(params["noiseRescaleType"])
+        noise_rescale_strength = float(params["noiseRescaleStrength"])
+        noise_lanczos_steps = int(params["noiseLanczosSteps"])
+        noise_spectral_floor = float(params["noiseSpectralFloor"])
+        noise_spectral_ceiling = float(params["noiseSpectralCeiling"])
         symmetry_projection_strength = float(params["symmetryProjectionStrength"])
         symmetry_projection_duration = (
             float(params["symmetryProjectionDuration"][0]),
@@ -202,6 +207,11 @@ class Trellis2SymmetrySparseStructure(Operation):
             noise_sampler = TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(
                 sampler=TRELLIS2SparseStructureLatentNoiseSampler(),
                 symmetry_strength=noise_symmetry_projection_strength,
+                rescale_type=noise_rescale_type,
+                rescale_strength=noise_rescale_strength,
+                lanczos_steps=noise_lanczos_steps,
+                spectral_floor=noise_spectral_floor,
+                spectral_ceiling=noise_spectral_ceiling,
             )
             noise = noise_sampler.sample(
                 batch_size=batch_size,

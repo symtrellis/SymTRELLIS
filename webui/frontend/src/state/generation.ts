@@ -2,6 +2,12 @@ import type { NodeRunResult, RequestId } from '../types';
 
 export type DurationRange = [number, number];
 
+export type NoiseRescaleType =
+  | 'global'
+  | 'voxel'
+  | 'coefficient'
+  | 'lanczos';
+
 export type CommonGenerationParams = {
   cfgDuration: DurationRange;
   cfgRescale: number;
@@ -12,6 +18,11 @@ export type CommonGenerationParams = {
 };
 
 export type SymmetryProjectionParams = {
+  noiseLanczosSteps: number;
+  noiseRescaleStrength: number;
+  noiseRescaleType: NoiseRescaleType;
+  noiseSpectralCeiling: number;
+  noiseSpectralFloor: number;
   noiseSymmetryProjectionStrength: number;
   symmetryProjectionDuration: DurationRange;
   symmetryProjectionStrength: number;
@@ -176,7 +187,10 @@ export function generationReducer<Params extends CommonGenerationParams, Metadat
     case 'generationRestored':
       return {
         metadata: action.metadata,
-        params: action.params,
+        params: {
+          ...state.params,
+          ...action.params,
+        },
         run: {
           errorMessage: '',
           progress: 1,
