@@ -366,9 +366,6 @@ class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNo
                     projector=projector,
                     symmetry_strength=self.symmetry_strength,
                     self_include=self_include,
-                    lanczos_steps=self.lanczos_steps,
-                    spectral_floor=self.spectral_floor,
-                    spectral_ceiling=self.spectral_ceiling,
                 )
             )
         else:
@@ -378,6 +375,9 @@ class TRELLIS2SparseStructureSymmetryProjectionNoiseSampler(SymmetryProjectionNo
                     projector=projector,
                     symmetry_strength=self.symmetry_strength,
                     self_include=self_include,
+                    lanczos_steps=self.lanczos_steps,
+                    spectral_floor=self.spectral_floor,
+                    spectral_ceiling=self.spectral_ceiling,
                 )
             )
 
@@ -739,9 +739,6 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
                 projector=projector,
                 symmetry_strength=self.symmetry_strength,
                 self_include=self_include,
-                lanczos_steps=self.lanczos_steps,
-                spectral_floor=self.spectral_floor,
-                spectral_ceiling=self.spectral_ceiling,
                 std=std,
             )
         else:
@@ -750,6 +747,9 @@ class TRELLIS2SparseLatentSymmetryProjectionNoiseSampler(SymmetryProjectionNoise
                 projector=projector,
                 symmetry_strength=self.symmetry_strength,
                 self_include=self_include,
+                lanczos_steps=self.lanczos_steps,
+                spectral_floor=self.spectral_floor,
+                spectral_ceiling=self.spectral_ceiling,
                 std=std,
             )
 
